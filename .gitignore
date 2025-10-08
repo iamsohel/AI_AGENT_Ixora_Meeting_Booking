@@ -1,0 +1,47 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment variables
+.env
+
+# Browser automation
+.playwright-state/
+screenshots/
+traces/
+
+# Test files and debugging
+test_*.py
+debug_*.py
+explore_*.py
+analyze_*.py
+verify_*.py
+quick_*.py
+real_*.py
+
+# Output files
+*.png
+*.txt
+*.html
+*.log
+
+# Temporary documentation (keep only README.md and ARCHITECTURE_EXPLANATION.md)
+BOOKING_*.md
+CHANGELOG.md
+COMPLETE_*.md
+FINAL_*.md
+FIX_*.md
+FIXES_*.md
+QUICKSTART.md
+RUN_GUIDE.md
+SLOT_*.md
+START_HERE.md
+TEST_*.md
+VERIFIED_*.md
