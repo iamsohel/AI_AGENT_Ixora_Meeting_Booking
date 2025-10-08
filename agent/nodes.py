@@ -162,7 +162,6 @@ def fetch_slots_node(state: AgentState, agent_executor: AgentExecutor) -> AgentS
 def select_slot_node(state: AgentState, llm) -> AgentState:
     """Select appropriate slot based on user preferences."""
     available_slots = state.get("available_slots", [])
-    time_pref = state.get("time_preference", "")
 
     if not available_slots:
         state["messages"].append(
@@ -176,55 +175,7 @@ def select_slot_node(state: AgentState, llm) -> AgentState:
         # Slot already selected, move on
         return state
 
-    # Check if user specified a time preference (like "10AM" or "10:00 AM")
-    if time_pref and time_pref != "not_specified":
-        # Try to find matching slot
-        import re
-
-        # Normalize time preference - remove spaces and extract hour
-        time_pref_normalized = time_pref.upper().replace(" ", "")
-        # Extract hour from preference (e.g., "10AM" -> "10")
-        pref_hour_match = re.search(r'(\d{1,2})', time_pref_normalized)
-        pref_hour = pref_hour_match.group(1) if pref_hour_match else None
-        pref_has_am_pm = "AM" in time_pref_normalized or "PM" in time_pref_normalized
-
-        for slot in available_slots:
-            slot_time = slot.get("time", "")
-            slot_time_normalized = slot_time.upper().replace(" ", "").replace(":", "")
-
-            # Check for match
-            # 1. Direct match: "10AM" matches "10:00AM" (after removing colon)
-            if time_pref_normalized.replace(":", "") in slot_time_normalized:
-                # Found matching slot!
-                state["selected_slot"] = slot
-                state["messages"].append(
-                    AIMessage(content=f"Perfect! I found the {slot_time} slot for you.")
-                )
-                state["next_action"] = "collect_user_info"
-                return state
-
-            # 2. Hour match: "10" or "10am" matches any slot starting with "10"
-            if pref_hour and slot_time_normalized.startswith(pref_hour):
-                # If user specified AM/PM, check it matches
-                if pref_has_am_pm:
-                    if ("AM" in time_pref_normalized and "AM" in slot_time_normalized) or \
-                       ("PM" in time_pref_normalized and "PM" in slot_time_normalized):
-                        state["selected_slot"] = slot
-                        state["messages"].append(
-                            AIMessage(content=f"Perfect! I found the {slot_time} slot for you.")
-                        )
-                        state["next_action"] = "collect_user_info"
-                        return state
-                else:
-                    # No AM/PM specified, match first slot with that hour
-                    state["selected_slot"] = slot
-                    state["messages"].append(
-                        AIMessage(content=f"Perfect! I found the {slot_time} slot for you.")
-                    )
-                    state["next_action"] = "collect_user_info"
-                    return state
-
-    # No matching slot or no time preference - show all slots
+    # Always show numbered list for user to choose
     slot_list = []
     for i, slot in enumerate(available_slots, 1):
         time = slot.get("time", "Unknown time")
@@ -380,8 +331,9 @@ def extract_user_info_node(state: AgentState, llm) -> AgentState:
                 logger.info(f"Extracted email: {state['user_email']}")
 
             # Extract phone using regex (supports various formats)
-            # Matches: +1234567890, 1234567890, (123) 456-7890, +88 909 808, +8989809, etc.
-            phone_pattern = r'[\+]?[\d][\d\s\-\(\)]{6,}'
+            # Matches: +1234567890, 1234567890, (123) 456-7890, +88 909 808, +8989809, +987777, etc.
+            # Minimum 6 digits total (including country code)
+            phone_pattern = r'[\+]?[\d][\d\s\-\(\)]{4,}'
             phone_match = re.search(phone_pattern, last_user_msg)
             if phone_match and not state.get("user_phone"):
                 state["user_phone"] = phone_match.group(0).strip()

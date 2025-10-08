@@ -153,9 +153,9 @@ class BookingAPI:
             logger.debug(f"Payload: {payload}")
 
             # Make API request
-            endpoint = f"{self.base_url}/appointments_ss"
+            endpoint = f"{self.base_url}/appointments"
 
-            async with httpx.AsyncClient(timeout=300.0) as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     endpoint,
                     json=payload,
@@ -164,8 +164,6 @@ class BookingAPI:
                         "Accept": "application/json"
                     }
                 )
-
-                print("response", response.json())
 
                 logger.info(f"API Response Status: {response.status_code}")
 
