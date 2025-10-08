@@ -643,7 +643,17 @@ def fetch_slots_sync(booking_url: str, date: Optional[str] = None, headless: boo
         async with BookingAutomation(booking_url, headless) as automation:
             return await automation.fetch_available_slots(date)
 
-    return asyncio.run(_fetch())
+    # Check if there's an existing event loop
+    try:
+        asyncio.get_running_loop()
+        # If we're in a running loop, run in a thread to avoid conflicts
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(lambda: asyncio.run(_fetch()))
+            return future.result()
+    except RuntimeError:
+        # No running loop, safe to use asyncio.run directly
+        return asyncio.run(_fetch())
 
 
 def book_meeting_sync(
@@ -657,7 +667,17 @@ def book_meeting_sync(
         async with BookingAutomation(booking_url, headless) as automation:
             return await automation.book_slot(slot_info, user_details)
 
-    return asyncio.run(_book())
+    # Check if there's an existing event loop
+    try:
+        asyncio.get_running_loop()
+        # If we're in a running loop, run in a thread to avoid conflicts
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(lambda: asyncio.run(_book()))
+            return future.result()
+    except RuntimeError:
+        # No running loop, safe to use asyncio.run directly
+        return asyncio.run(_book())
 
 
 def analyze_page_sync(booking_url: str, headless: bool = False) -> Dict:
@@ -666,4 +686,14 @@ def analyze_page_sync(booking_url: str, headless: bool = False) -> Dict:
         async with BookingAutomation(booking_url, headless) as automation:
             return await automation.analyze_page_structure()
 
-    return asyncio.run(_analyze())
+    # Check if there's an existing event loop
+    try:
+        asyncio.get_running_loop()
+        # If we're in a running loop, run in a thread to avoid conflicts
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(lambda: asyncio.run(_analyze()))
+            return future.result()
+    except RuntimeError:
+        # No running loop, safe to use asyncio.run directly
+        return asyncio.run(_analyze())
