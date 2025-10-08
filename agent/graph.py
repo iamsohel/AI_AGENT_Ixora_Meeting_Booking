@@ -178,6 +178,25 @@ class BookingAgent:
                 self.state = select_slot_node(self.state, self.llm)
                 # Don't proceed further, wait for user to select a slot
 
+        elif current_action == "wait_for_new_date":
+            # User wants to try a different date - clear old date and re-extract
+            self.state["date_preference"] = "not_specified"
+            self.state["time_preference"] = "not_specified"
+            self.state["available_slots"] = []
+            self.state["selected_slot"] = {}
+
+            # Re-extract requirements from new user input
+            self.state = extract_requirements_node(self.state, self.llm)
+
+            # Check if requirements are complete
+            if check_requirements_complete(self.state) == "complete":
+                # Fetch slots for new date
+                self.state = fetch_slots_node(self.state, self.agent_executor)
+                self.state = select_slot_node(self.state, self.llm)
+            else:
+                # Still missing info, ask for it
+                self.state = ask_for_missing_info_node(self.state, self.llm)
+
         elif current_action == "wait_for_slot_selection":
             # User is selecting a time slot
             self.state = process_slot_selection_node(self.state, self.llm)

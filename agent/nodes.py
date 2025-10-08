@@ -167,7 +167,7 @@ def select_slot_node(state: AgentState, llm) -> AgentState:
         state["messages"].append(
             AIMessage(content="No available slots found for your preferred date. Would you like to try a different date?")
         )
-        state["next_action"] = "wait_for_user_input"
+        state["next_action"] = "wait_for_new_date"
         return state
 
     # Check if user has already selected a slot
