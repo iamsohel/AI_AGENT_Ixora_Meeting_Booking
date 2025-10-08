@@ -185,17 +185,33 @@ class BookingAgent:
             self.state["available_slots"] = []
             self.state["selected_slot"] = {}
 
-            # Re-extract requirements from new user input
-            self.state = extract_requirements_node(self.state, self.llm)
+            # Check if user gave affirmative or negative response
+            user_msg_lower = user_message.lower().strip()
+            affirmative_responses = ["yes", "yeah", "yup", "sure", "ok", "okay", "yep", "y"]
+            negative_responses = ["no", "nope", "nah", "n", "cancel", "quit", "exit"]
 
-            # Check if requirements are complete
-            if check_requirements_complete(self.state) == "complete":
-                # Fetch slots for new date
-                self.state = fetch_slots_node(self.state, self.agent_executor)
-                self.state = select_slot_node(self.state, self.llm)
-            else:
-                # Still missing info, ask for it
+            if user_msg_lower in affirmative_responses:
+                # User just said yes, ask for new date/time
                 self.state = ask_for_missing_info_node(self.state, self.llm)
+            elif user_msg_lower in negative_responses:
+                # User declined, end conversation gracefully
+                from langchain_core.messages import AIMessage
+                self.state["messages"].append(
+                    AIMessage(content="No problem! Feel free to reach out when you'd like to book a meeting. Have a great day!")
+                )
+                self.state["next_action"] = ""  # End conversation
+            else:
+                # Re-extract requirements from new user input
+                self.state = extract_requirements_node(self.state, self.llm)
+
+                # Check if requirements are complete
+                if check_requirements_complete(self.state) == "complete":
+                    # Fetch slots for new date
+                    self.state = fetch_slots_node(self.state, self.agent_executor)
+                    self.state = select_slot_node(self.state, self.llm)
+                else:
+                    # Still missing info, ask for it
+                    self.state = ask_for_missing_info_node(self.state, self.llm)
 
         elif current_action == "wait_for_slot_selection":
             # User is selecting a time slot

@@ -175,7 +175,27 @@ def select_slot_node(state: AgentState, llm) -> AgentState:
         # Slot already selected, move on
         return state
 
-    # Always show numbered list for user to choose
+    # Check if user's time preference exactly matches an available slot
+    time_pref = state.get("time_preference", "")
+    if time_pref and time_pref != "not_specified":
+        # Normalize time preference for comparison (e.g., "10:30 am" -> "10:30 AM")
+        time_pref_normalized = time_pref.strip().upper().replace(" ", "")
+
+        for slot in available_slots:
+            slot_time = slot.get("time", "")
+            slot_time_normalized = slot_time.strip().upper().replace(" ", "")
+
+            # Check for exact match
+            if time_pref_normalized == slot_time_normalized:
+                # Auto-select this slot
+                state["selected_slot"] = slot
+                state["messages"].append(
+                    AIMessage(content=f"Great! I found a slot at {slot_time} on your preferred date.")
+                )
+                state["next_action"] = "collect_user_info"
+                return state
+
+    # No exact match found - show numbered list for user to choose
     slot_list = []
     for i, slot in enumerate(available_slots, 1):
         time = slot.get("time", "Unknown time")
@@ -185,7 +205,7 @@ def select_slot_node(state: AgentState, llm) -> AgentState:
 
 {chr(10).join(slot_list)}
 
-Please choose a slot by number (e.g., "1") or specify your preferred time."""
+Please choose a slot by number (e.g., "1")."""
 
     state["messages"].append(AIMessage(content=slots_message))
     state["next_action"] = "wait_for_slot_selection"
