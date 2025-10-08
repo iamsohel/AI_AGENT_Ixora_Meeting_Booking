@@ -70,7 +70,10 @@ class BookingAutomation:
 
             # If specific date provided, select it from the calendar
             if date:
-                await self._select_date(date)
+                date_selected = await self._select_date(date)
+                if not date_selected:
+                    logger.error(f"Failed to select date {date} - date may not be available for booking")
+                    return []
             else:
                 # If no date specified, click on today or the first available date
                 logger.info("No date specified, looking for first available date")
@@ -188,9 +191,13 @@ class BookingAutomation:
             logger.error(traceback.format_exc())
             return []
 
-    async def _select_date(self, date: str):
+    async def _select_date(self, date: str) -> bool:
         """Select a specific date on the booking calendar.
-        Microsoft Bookings shows a calendar grid with date numbers as buttons."""
+        Microsoft Bookings shows a calendar grid with date numbers as buttons.
+
+        Returns:
+            True if date was selected successfully, False otherwise
+        """
         try:
             # Parse the target date
             target_date = datetime.strptime(date, "%Y-%m-%d")
@@ -249,14 +256,22 @@ class BookingAutomation:
                 await potential_date_elements[0].click()
                 await self.page.wait_for_timeout(3000)  # Wait for time slots to load
                 logger.info(f"Successfully clicked date {target_date.day}")
-                return
+                return True
 
             logger.warning(f"Could not find clickable element for date {target_date.day}")
+            return False
 
         except Exception as e:
-            logger.error(f"Error selecting date: {e}")
+            error_msg = str(e)
+            logger.error(f"Error selecting date: {error_msg}")
+
+            # Check if date is not available (disabled)
+            if "element is not enabled" in error_msg.lower():
+                logger.warning(f"Date {date} is not available for booking (element disabled)")
+
             import traceback
             logger.error(traceback.format_exc())
+            return False
 
     async def book_slot(
         self,
@@ -285,7 +300,12 @@ class BookingAutomation:
             # Select the date if provided
             if date:
                 logger.info(f"Selecting date: {date}")
-                await self._select_date(date)
+                date_selected = await self._select_date(date)
+                if not date_selected:
+                    return {
+                        "success": False,
+                        "error": f"Could not select date {date} - date may not be available for booking"
+                    }
 
             # Wait for slots to appear after date selection
             await self.page.wait_for_timeout(3000)
