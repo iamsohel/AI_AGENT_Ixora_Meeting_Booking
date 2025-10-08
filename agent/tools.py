@@ -312,6 +312,11 @@ class ParseDateTool(BaseTool):
             today = datetime.now()
             date_string_lower = date_string.lower().strip()
 
+            # Remove ordinal suffixes (1st, 2nd, 3rd, 4th, etc.)
+            import re
+            date_string = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', date_string)
+            date_string_lower = date_string.lower().strip()
+
             # Handle relative dates
             if date_string_lower == "today":
                 target_date = today

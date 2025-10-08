@@ -2,6 +2,7 @@
 import logging
 from datetime import datetime
 from typing import Dict
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,8 @@ class BookingAPI:
                     "timeZone": self.timezone
                 },
                 "serviceId": self.service_id,
-                "staffMemberIds": [self.staff_ids[0]],  # Use first staff member
+                # Use first staff member
+                "staffMemberIds": [self.staff_ids[0]],
                 "customers": [
                     {
                         "name": name,
@@ -144,15 +146,16 @@ class BookingAPI:
         """
         try:
             # Create payload
-            payload = self.create_booking_payload(date, time, name, email, phone, notes)
+            payload = self.create_booking_payload(
+                date, time, name, email, phone, notes)
 
             logger.info(f"Booking appointment for {name} on {date} at {time}")
             logger.debug(f"Payload: {payload}")
 
             # Make API request
-            endpoint = f"{self.base_url}/appointments"
+            endpoint = f"{self.base_url}/appointments_ss"
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=300.0) as client:
                 response = await client.post(
                     endpoint,
                     json=payload,
@@ -161,6 +164,8 @@ class BookingAPI:
                         "Accept": "application/json"
                     }
                 )
+
+                print("response", response.json())
 
                 logger.info(f"API Response Status: {response.status_code}")
 
@@ -183,7 +188,8 @@ class BookingAPI:
                         }
                 else:
                     # Error
-                    logger.error(f"Booking failed with status {response.status_code}")
+                    logger.error(
+                        f"Booking failed with status {response.status_code}")
                     logger.error(f"Response: {response.text[:500]}")
 
                     return {

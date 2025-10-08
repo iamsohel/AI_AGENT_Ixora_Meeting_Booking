@@ -171,12 +171,32 @@ class BookingAgent:
                 self.state = collect_user_info_node(self.state, self.llm)
 
         elif current_action == "wait_for_user_info":
-            # User provided contact info
-            self.state = extract_user_info_node(self.state, self.llm)
-            self.state = collect_user_info_node(self.state, self.llm)
-            # If all info is now collected, proceed to confirmation
-            if self.state.get("next_action") == "wait_for_confirmation":
-                self.state = confirm_booking_node(self.state, self.llm)
+            # Check if user wants to start a new booking instead
+            user_msg_lower = user_message.lower()
+            booking_keywords = ["book", "schedule", "meeting", "appointment"]
+            date_keywords = [
+                "jan", "january", "feb", "february", "mar", "march",
+                "apr", "april", "may", "jun", "june", "jul", "july",
+                "aug", "august", "sep", "september", "oct", "october",
+                "nov", "november", "dec", "december",
+                "tomorrow", "today", "next week", "next monday", "next tuesday",
+                "next wednesday", "next thursday", "next friday", "next saturday", "next sunday"
+            ]
+
+            if any(keyword in user_msg_lower for keyword in booking_keywords) and \
+               any(date_word in user_msg_lower for date_word in date_keywords):
+                # User wants to start a new booking, reset and restart
+                self.initialize_state()
+                self.state["messages"].append(HumanMessage(content=user_message))
+                result = self.workflow.invoke(self.state)
+                self.state = result
+            else:
+                # User provided contact info
+                self.state = extract_user_info_node(self.state, self.llm)
+                self.state = collect_user_info_node(self.state, self.llm)
+                # If all info is now collected, proceed to confirmation
+                if self.state.get("next_action") == "wait_for_confirmation":
+                    self.state = confirm_booking_node(self.state, self.llm)
 
         elif current_action == "wait_for_confirmation":
             # User confirmed or declined
