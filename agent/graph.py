@@ -84,9 +84,24 @@ def create_workflow(llm, agent_executor: AgentExecutor):
     # Ask for missing info ends the graph (waits for user input)
     workflow.add_edge("ask_missing_info", END)
 
-    # Fetch slots -> Select slot -> Collect user info
+    # Fetch slots -> Select slot
     workflow.add_edge("fetch_slots", "select_slot")
-    workflow.add_edge("select_slot", "collect_user_info")
+
+    # Select slot either waits for user selection or proceeds to collect info
+    def check_slot_selection(state: AgentState) -> Literal["wait", "proceed"]:
+        """Check if we need to wait for user to select a slot."""
+        if state.get("next_action") == "wait_for_slot_selection":
+            return "wait"
+        return "proceed"
+
+    workflow.add_conditional_edges(
+        "select_slot",
+        check_slot_selection,
+        {
+            "wait": END,  # Wait for user to select slot
+            "proceed": "collect_user_info"
+        }
+    )
 
     # Collect user info either ends (to wait for input) or goes to confirmation
     def check_user_info_complete(state: AgentState) -> Literal["wait", "confirm"]:
