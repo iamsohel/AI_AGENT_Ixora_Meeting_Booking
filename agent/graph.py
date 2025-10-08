@@ -89,8 +89,9 @@ def create_workflow(llm, agent_executor: AgentExecutor):
 
     # Select slot either waits for user selection or proceeds to collect info
     def check_slot_selection(state: AgentState) -> Literal["wait", "proceed"]:
-        """Check if we need to wait for user to select a slot."""
-        if state.get("next_action") == "wait_for_slot_selection":
+        """Check if we need to wait for user to select a slot or provide new date."""
+        next_action = state.get("next_action", "")
+        if next_action in ["wait_for_slot_selection", "wait_for_new_date"]:
             return "wait"
         return "proceed"
 
