@@ -155,7 +155,7 @@ class BookingAPI:
             # Make API request
             endpoint = f"{self.base_url}/appointments"
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=300.0) as client:
                 response = await client.post(
                     endpoint,
                     json=payload,
@@ -165,8 +165,9 @@ class BookingAPI:
                     }
                 )
 
+                print("RES:::, ", response.status_code, response.json())
+
                 logger.info(f"API Response Status: {response.status_code}")
-                logger.debug(f"Response text: {response.text[:500]}")
 
                 if response.status_code in [200, 201]:
                     # Success

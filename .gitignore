@@ -45,3 +45,11 @@ SLOT_*.md
 START_HERE.md
 TEST_*.md
 VERIFIED_*.md
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.env
+frontend/.env.local
+frontend/.env.production

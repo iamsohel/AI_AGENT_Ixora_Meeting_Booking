@@ -12,10 +12,11 @@ from agent.graph import BookingAgent
 # Load environment variables
 load_dotenv()
 
-# 
+#
 # https://outlook.office365.com/BookingsService/api/V1/bookingBusinessesc2/SoftwareSolution@iglobe.dk/appointments
 
 # {"appointment":{"startTime":{"dateTime":"2025-10-12T17:00:00","timeZone":"Bangladesh Standard Time"},"endTime":{"dateTime":"2025-10-12T17:30:00","timeZone":"Bangladesh Standard Time"},"serviceId":"bc2ea66a-7e7f-4ae4-9b20-d68a2aa1c3a0","staffMemberIds":["622acedc-716a-4287-9198-08f340ffecf3"],"customers":[{"name":"Mr. Adam","emailAddress":"adm.lord@gmail.com","phone":"","notes":"","timeZone":"Bangladesh Standard Time","answeredCustomQuestions":[],"location":{"displayName":"","address":{"street":"","type":"Other"}},"smsNotificationsEnabled":false,"instanceId":"","price":0,"priceType":"SERVICEDEFAULTPRICETYPES_NOT_SET"}],"isLocationOnline":true,"smsNotificationsEnabled":false,"verificationCode":"","customerTimeZone":"Bangladesh Standard Time","trackingDataId":"","bookingFormInfoList":[],"price":0,"priceType":"SERVICEDEFAULTPRICETYPES_NOT_SET","isAllDay":false,"additionalRecipients":[]},"preferences":{"staffCandidates":["622acedc-716a-4287-9198-08f340ffecf3","29272458-d06e-4125-b710-5914403055d9"]}}
+
 
 def print_banner():
     """Print welcome banner."""
@@ -75,10 +76,10 @@ def run_test_mode(agent: BookingAgent):
 
 def run_interactive_mode(agent: BookingAgent):
     """Run interactive conversation mode."""
-    print_banner()
+    # print_banner()
 
     # Initial greeting
-    print("Agent: Hello! I'm here to help you book a meeting with Ixora Solution's CEO.")
+    print("Agent: Welcome! I am iXora AI Assistant. I'm here to help you book a meeting with Ixora Solution's CEO and CTO.")
     print("       What date and time would work best for you?\n")
 
     while True:
