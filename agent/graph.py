@@ -222,8 +222,11 @@ class BookingAgent:
                 self.state = collect_user_info_node(self.state, self.llm)
 
         elif current_action == "wait_for_user_info":
+            # Check if user gave acknowledgment without actual info
+            user_msg_lower = user_message.lower().strip()
+            acknowledgment_phrases = ["go ahead", "sure", "ok", "okay", "proceed", "continue", "yes"]
+
             # Check if user wants to start a new booking instead
-            user_msg_lower = user_message.lower()
             booking_keywords = ["book", "schedule", "meeting", "appointment"]
             date_keywords = [
                 "jan", "january", "feb", "february", "mar", "march",
@@ -234,7 +237,14 @@ class BookingAgent:
                 "next wednesday", "next thursday", "next friday", "next saturday", "next sunday"
             ]
 
-            if any(keyword in user_msg_lower for keyword in booking_keywords) and \
+            if user_msg_lower in acknowledgment_phrases:
+                # User acknowledged but didn't provide info - give helpful prompt
+                from langchain_core.messages import AIMessage
+                self.state["messages"].append(
+                    AIMessage(content="Please provide your name, email, and phone number (e.g., 'John Doe, john@example.com, +1234567890').")
+                )
+                self.state["next_action"] = "wait_for_user_info"
+            elif any(keyword in user_msg_lower for keyword in booking_keywords) and \
                any(date_word in user_msg_lower for date_word in date_keywords):
                 # User wants to start a new booking, reset and restart
                 self.initialize_state()

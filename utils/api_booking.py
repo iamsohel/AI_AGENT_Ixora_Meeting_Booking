@@ -150,7 +150,7 @@ class BookingAPI:
                 date, time, name, email, phone, notes)
 
             logger.info(f"Booking appointment for {name} on {date} at {time}")
-            logger.debug(f"Payload: {payload}")
+            logger.info(f"Payload: {payload}")
 
             # Make API request
             endpoint = f"{self.base_url}/appointments"
@@ -166,6 +166,7 @@ class BookingAPI:
                 )
 
                 logger.info(f"API Response Status: {response.status_code}")
+                logger.debug(f"Response text: {response.text[:500]}")
 
                 if response.status_code in [200, 201]:
                     # Success
