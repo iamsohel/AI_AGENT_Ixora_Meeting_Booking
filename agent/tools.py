@@ -359,6 +359,8 @@ class ParseDateTool(BaseTool):
                     "%d %b",  # 15 Oct
                     "%B %d, %Y",  # October 15, 2024
                     "%b %d, %Y",  # Oct 15, 2024
+                    "%d %B, %Y",  # 20 November, 2025
+                    "%d %b, %Y",  # 20 Nov, 2025
                     "%d %B %Y",  # 15 October 2024
                     "%d %b %Y",  # 15 Oct 2024
                     "%m/%d/%Y",

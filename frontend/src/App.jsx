@@ -2,14 +2,17 @@ import axios from "axios";
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://10.5.5.116:8000";
 
 function App() {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState("");
   const [sessionId, setSessionId] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
   const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -25,6 +28,27 @@ function App() {
     createSession();
   }, []);
 
+  const toggleChat = () => {
+    setIsOpen(!isOpen);
+  };
+
+  // Auto-focus input when chat opens
+  useEffect(() => {
+    if (isOpen && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isOpen]);
+
+  // Auto-focus input after response is complete
+  useEffect(() => {
+    if (!isLoading && inputRef.current && isOpen) {
+      // Small delay to ensure DOM is updated
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+    }
+  }, [isLoading, isOpen]);
+
   const createSession = async () => {
     try {
       const response = await axios.post(`${API_BASE_URL}/api/session`);
@@ -33,7 +57,7 @@ function App() {
       setMessages([
         {
           type: "agent",
-          text: "Welcome! I am iXora AI Agent. I'm here to help you book a meeting with Ixora Solution's CEO and CTO. What date and time would work best for you?",
+          text: "Hi! I'm your iXora AI assistant 👋\n\nI can help you schedule a meeting with our CEO and CTO. Simply tell me your preferred date and time.\n\nWhen would you like to meet?",
           timestamp: new Date().toISOString(),
         },
       ]);
@@ -68,50 +92,119 @@ function App() {
 
     setIsLoading(true);
 
+    // Add placeholder for streaming response
+    const streamingMessageId = Date.now();
+    setMessages((prev) => [
+      ...prev,
+      {
+        type: "agent",
+        text: "",
+        timestamp: new Date().toISOString(),
+        isStreaming: true,
+        id: streamingMessageId,
+      },
+    ]);
+
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/chat`, {
-        message: userMessage,
-        session_id: sessionId,
+      // Use fetch for SSE streaming
+      const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: userMessage,
+          session_id: sessionId,
+        }),
       });
 
-      // Add agent response
-      setMessages((prev) => [
-        ...prev,
-        {
-          type: "agent",
-          text: response.data.message,
-          timestamp: response.data.timestamp,
-        },
-      ]);
+      if (!response.ok) {
+        throw new Error("Failed to connect to streaming endpoint");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+
+        // Process complete lines
+        for (let i = 0; i < lines.length - 1; i++) {
+          const line = lines[i].trim();
+
+          if (line.startsWith("data: ")) {
+            const data = JSON.parse(line.substring(6));
+
+            if (data.error) {
+              // Handle error
+              setStatusMessage("");
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === streamingMessageId
+                    ? {
+                        ...msg,
+                        text: `Error: ${data.error}`,
+                        type: "error",
+                        isStreaming: false,
+                      }
+                    : msg
+                )
+              );
+              break;
+            } else if (data.done) {
+              // Streaming complete
+              setStatusMessage("");
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === streamingMessageId
+                    ? { ...msg, isStreaming: false }
+                    : msg
+                )
+              );
+              break;
+            } else if (data.status !== undefined) {
+              // Update status message
+              setStatusMessage(data.status);
+            } else if (data.chunk) {
+              // Append chunk to message
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === streamingMessageId
+                    ? { ...msg, text: msg.text + data.chunk }
+                    : msg
+                )
+              );
+            }
+          }
+        }
+
+        // Keep the last incomplete line in buffer
+        buffer = lines[lines.length - 1];
+      }
     } catch (error) {
       console.error("Error sending message:", error);
-      setMessages((prev) => [
-        ...prev,
-        {
-          type: "error",
-          text: "Sorry, there was an error processing your message. Please try again.",
-          timestamp: new Date().toISOString(),
-        },
-      ]);
+      setStatusMessage("");
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === streamingMessageId
+            ? {
+                ...msg,
+                text: "Sorry, there was an error processing your message. Please try again.",
+                type: "error",
+                isStreaming: false,
+              }
+            : msg
+        )
+      );
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const resetChat = async () => {
-    if (!sessionId) return;
-
-    try {
-      await axios.post(`${API_BASE_URL}/api/reset`, { session_id: sessionId });
-      setMessages([
-        {
-          type: "agent",
-          text: "Conversation reset. What date and time would work best for you?",
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    } catch (error) {
-      console.error("Error resetting chat:", error);
+      setStatusMessage("");
     }
   };
 
@@ -125,20 +218,50 @@ function App() {
 
   return (
     <div className="app">
-      <div className="chat-container">
+      {/* Floating Chat Button */}
+      <button
+        className={`chat-button ${isOpen ? "open" : ""}`}
+        onClick={toggleChat}
+        aria-label={isOpen ? "Close chat" : "Open chat"}
+      >
+        <svg
+          className="chat-icon"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+          />
+        </svg>
+        <svg
+          className="close-icon"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M6 18L18 6M6 6l12 12"
+          />
+        </svg>
+      </button>
+
+      {/* Chat Container */}
+      <div className={`chat-container ${isOpen ? "open" : ""}`}>
         {/* Header */}
         <div className="chat-header">
           <div className="header-content">
-            <h1>🤖 Ixora Meeting Booking</h1>
-            <p>AI-Powered Scheduling Assistant</p>
+            <h1>
+              <span className="brand-icon">✦</span> iXora AI Assistant
+            </h1>
+            <p>Book a meeting with our leadership</p>
           </div>
-          <button
-            onClick={resetChat}
-            className="reset-btn"
-            title="Reset conversation"
-          >
-            ↻ Reset
-          </button>
         </div>
 
         {/* Messages */}
@@ -146,14 +269,24 @@ function App() {
           {messages.map((msg, index) => (
             <div key={index} className={`message ${msg.type}`}>
               <div className="message-content">
-                <div className="message-text">{msg.text}</div>
+                <div className="message-text">
+                  {msg.text}
+                  {msg.isStreaming && statusMessage && (
+                    <div className="status-message">
+                      <span className="status-icon">⏳</span> {statusMessage}
+                    </div>
+                  )}
+                  {msg.isStreaming && !statusMessage && msg.text && (
+                    <span className="typing-cursor">▊</span>
+                  )}
+                </div>
                 <div className="message-time">
                   {formatTimestamp(msg.timestamp)}
                 </div>
               </div>
             </div>
           ))}
-          {isLoading && (
+          {isLoading && !messages.some((msg) => msg.isStreaming) && (
             <div className="message agent">
               <div className="message-content">
                 <div className="typing-indicator">
@@ -169,21 +302,47 @@ function App() {
 
         {/* Input */}
         <form onSubmit={sendMessage} className="input-container">
-          <input
-            type="text"
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            placeholder="Type your message..."
-            disabled={!sessionId || isLoading}
-            className="message-input"
-          />
-          <button
-            type="submit"
-            disabled={!inputMessage.trim() || !sessionId || isLoading}
-            className="send-btn"
-          >
-            Send ➤
-          </button>
+          <div className="input-wrapper">
+            <input
+              ref={inputRef}
+              type="text"
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              placeholder="Ask me anything..."
+              disabled={!sessionId || isLoading}
+              className="message-input"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  if (inputMessage.trim() && sessionId && !isLoading) {
+                    sendMessage(e);
+                  }
+                }
+              }}
+            />
+            {inputMessage.trim() && (
+              <button
+                type="submit"
+                disabled={!sessionId || isLoading}
+                className="send-icon-btn"
+                aria-label="Send message"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 19V5M5 12l7-7 7 7" />
+                </svg>
+              </button>
+            )}
+          </div>
         </form>
       </div>
     </div>

@@ -93,15 +93,28 @@ def ask_for_missing_info_node(state: AgentState, llm) -> AgentState:
     """Ask user for missing information."""
     missing_fields = []
 
-    if state.get("date_preference", "not_specified") == "not_specified":
+    date_missing = state.get("date_preference", "not_specified") == "not_specified"
+    time_missing = state.get("time_preference", "not_specified") == "not_specified"
+
+    if date_missing:
         missing_fields.append("date")
-    if state.get("time_preference", "not_specified") == "not_specified":
+    if time_missing:
         missing_fields.append("time")
 
-    prompt = f"I am a meeting booking agent, I need some more information. What {' and '.join(missing_fields)} would work best for you?"
+    # If date is provided but time is missing, ask specifically for time only
+    if not date_missing and time_missing:
+        prompt = "What time would you prefer for the meeting?"
+        state["next_action"] = "wait_for_time_only"
+    elif date_missing and not time_missing:
+        # Time provided but date missing - ask for date
+        prompt = "What date would you like to schedule the meeting?"
+        state["next_action"] = "wait_for_user_input"
+    else:
+        # Both missing or first time asking
+        prompt = f"What {' and '.join(missing_fields)} would work best for you?"
+        state["next_action"] = "wait_for_user_input"
 
     state["messages"].append(AIMessage(content=prompt))
-    state["next_action"] = "wait_for_user_input"
 
     return state
 
@@ -238,14 +251,24 @@ def process_slot_selection_node(state: AgentState, llm) -> AgentState:
     # Try to parse as slot number
     try:
         slot_number = int(user_input)
-        if 1 <= slot_number <= len(available_slots):
-            state["selected_slot"] = available_slots[slot_number - 1]
+
+        # Validate slot number is within range
+        if slot_number < 1 or slot_number > len(available_slots):
             state["messages"].append(
                 AIMessage(
-                    content=f"Perfect! You've selected the {available_slots[slot_number - 1].get('time')} slot.")
+                    content=f"Sorry, slot number {slot_number} is not valid. Please choose a number between 1 and {len(available_slots)}.")
             )
-            state["next_action"] = "collect_user_info"
+            state["next_action"] = "wait_for_slot_selection"
             return state
+
+        # Valid slot number
+        state["selected_slot"] = available_slots[slot_number - 1]
+        state["messages"].append(
+            AIMessage(
+                content=f"Perfect! You've selected the {available_slots[slot_number - 1].get('time')} slot.")
+        )
+        state["next_action"] = "collect_user_info"
+        return state
     except ValueError:
         pass
 
@@ -434,6 +457,36 @@ def extract_user_info_node(state: AgentState, llm) -> AgentState:
         except:
             pass
 
+    # Validate extracted information
+    validation_errors = []
+
+    # Validate name (at least 2 characters)
+    if state.get("user_name"):
+        name = state["user_name"].strip()
+        if len(name) < 2:
+            validation_errors.append("name should be at least 2 characters")
+            state["user_name"] = ""  # Clear invalid name
+
+    # Validate email format
+    if state.get("user_email"):
+        email = state["user_email"].strip()
+        # More comprehensive email validation
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, email):
+            validation_errors.append("email format is invalid")
+            state["user_email"] = ""  # Clear invalid email
+
+    # If there are validation errors, add a message
+    if validation_errors:
+        error_message = "I found some issues with the information provided:\n"
+        for error in validation_errors:
+            error_message += f"• {error}\n"
+        error_message += "\nPlease provide the correct information."
+
+        state["messages"].append(AIMessage(content=error_message))
+        # Keep waiting for correct user info
+        state["next_action"] = "wait_for_user_info"
+
     return state
 
 
@@ -441,13 +494,26 @@ def confirm_booking_node(state: AgentState, llm) -> AgentState:
     """Ask for final confirmation before booking."""
     selected_slot = state.get("selected_slot", {})
     slot_time = selected_slot.get("time", "the selected time")
+    date_preference = state.get("date_preference", "")
+
+    # Format the date nicely if available
+    date_display = date_preference
+    if date_preference and date_preference != "not_specified":
+        try:
+            from datetime import datetime
+            # Try to parse and format the date
+            parsed_date = datetime.strptime(date_preference, "%Y-%m-%d")
+            date_display = parsed_date.strftime("%B %d, %Y")  # e.g., "October 14, 2025"
+        except:
+            # If parsing fails, use as-is
+            date_display = date_preference
 
     confirmation_msg = f"""Let me confirm the details:
+- Date: {date_display}
 - Time: {slot_time}
 - Name: {state.get('user_name', 'N/A')}
 - Email: {state.get('user_email', 'N/A')}
 - Phone: {state.get('user_phone', 'N/A')}
-- Purpose: {state.get('meeting_purpose', 'Meeting with CEO')}
 
 Should I proceed with the booking?"""
 

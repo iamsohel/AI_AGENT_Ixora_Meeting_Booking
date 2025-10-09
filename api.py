@@ -1,5 +1,7 @@
 """FastAPI application for Ixora Meeting Booking Agent."""
 
+import asyncio
+import json
 import os
 import uuid
 from datetime import datetime, timedelta
@@ -8,6 +10,7 @@ from typing import Dict, Optional
 from dotenv import load_dotenv
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 
@@ -27,7 +30,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000",
-                   "http://localhost:5173"],  # React dev servers
+                   "http://localhost:3001", "http://10.5.5.116:3000"],  # React dev servers
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -155,6 +158,94 @@ async def chat(request: ChatRequest = Body(...)):
             message=response_message,
             session_id=session_id,
             timestamp=datetime.now().isoformat()
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing message: {str(e)}"
+        )
+
+
+async def generate_stream(agent: BookingAgent, message: str, session_id: str):
+    """
+    Generator function for SSE streaming.
+
+    Yields formatted SSE events with chunks of the agent's response.
+    """
+    try:
+        # Process message and get response chunks
+        async for item in agent.process_message_stream(message):
+            # Check if it's a status update or chunk
+            if isinstance(item, dict):
+                if item.get("type") == "status":
+                    # Send status update
+                    event_data = {
+                        "status": item.get("message", ""),
+                        "session_id": session_id,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                elif item.get("type") == "chunk":
+                    # Send text chunk
+                    event_data = {
+                        "chunk": item.get("data", ""),
+                        "session_id": session_id,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                else:
+                    continue
+            else:
+                # Backwards compatibility - treat as chunk
+                event_data = {
+                    "chunk": item,
+                    "session_id": session_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+
+            yield f"data: {json.dumps(event_data)}\n\n"
+
+            # Small delay to prevent overwhelming the client
+            await asyncio.sleep(0.01)
+
+        # Send completion event
+        yield f"data: {json.dumps({'done': True, 'session_id': session_id})}\n\n"
+
+    except Exception as e:
+        # Send error event
+        error_data = {
+            "error": str(e),
+            "session_id": session_id
+        }
+        yield f"data: {json.dumps(error_data)}\n\n"
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest = Body(...)):
+    """
+    Send a message to the booking agent and stream the response via SSE.
+
+    Args:
+        request: ChatRequest with message and optional session_id
+
+    Returns:
+        StreamingResponse with text/event-stream content
+    """
+    try:
+        # Generate session ID if not provided
+        session_id = request.session_id or str(uuid.uuid4())
+
+        # Get or create agent for this session
+        agent = get_or_create_agent(session_id)
+
+        # Return streaming response
+        return StreamingResponse(
+            generate_stream(agent, request.message, session_id),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # Disable nginx buffering
+            }
         )
 
     except Exception as e:

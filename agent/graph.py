@@ -160,7 +160,7 @@ class BookingAgent:
 
     def process_message(self, user_message: str):
         """Process a user message through the workflow."""
-        from langchain_core.messages import HumanMessage
+        from langchain_core.messages import HumanMessage, AIMessage
 
         if self.state is None:
             self.initialize_state()
@@ -168,8 +168,22 @@ class BookingAgent:
         # Add user message to state
         self.state["messages"].append(HumanMessage(content=user_message))
 
-        # Determine which node to run based on state
+        # Check for greetings first (only if no active booking in progress)
         current_action = self.state.get("next_action", "")
+        user_msg_lower = user_message.lower().strip()
+
+        # Greeting keywords
+        greetings = ["hi", "hello", "hey", "good morning", "good afternoon",
+                     "good evening", "greetings", "howdy", "yo", "sup", "what's up"]
+
+        # Check if it's just a greeting (not in middle of booking flow)
+        if not current_action and any(greeting == user_msg_lower or user_msg_lower.startswith(greeting + " ") for greeting in greetings):
+            self.state["messages"].append(
+                AIMessage(content="Hello! 👋 Welcome to iXora Solution.\n\nI'm here to help you schedule a meeting with our CEO and CTO. What date and time would work best for you?")
+            )
+            return self.state["messages"][-1].content
+
+        # Determine which node to run based on state
 
         if current_action == "wait_for_user_input":
             # User provided missing info, re-extract requirements
@@ -178,6 +192,23 @@ class BookingAgent:
                 self.state = fetch_slots_node(self.state, self.agent_executor)
                 self.state = select_slot_node(self.state, self.llm)
                 # Don't proceed further, wait for user to select a slot
+
+        elif current_action == "wait_for_time_only":
+            # User provided time after date was already given
+            # Extract only the time preference from the latest message
+            self.state = extract_requirements_node(self.state, self.llm)
+
+            # Check if time was successfully extracted
+            if self.state.get("time_preference", "not_specified") != "not_specified":
+                # Time was provided, now fetch slots with date + time
+                self.state = fetch_slots_node(self.state, self.agent_executor)
+                self.state = select_slot_node(self.state, self.llm)
+            else:
+                # Time extraction failed, ask again
+                self.state["messages"].append(
+                    AIMessage(content="I couldn't understand the time. Please provide a specific time like '2 PM', '14:00', or '3:30 PM'.")
+                )
+                self.state["next_action"] = "wait_for_time_only"
 
         elif current_action == "wait_for_new_date":
             # User wants to try a different date - clear old date and re-extract
@@ -264,10 +295,93 @@ class BookingAgent:
             if check_confirmation(self.state, self.llm) == "confirmed":
                 self.state = book_meeting_node(self.state, self.agent_executor)
             else:
-                from langchain_core.messages import AIMessage
+                # User declined - reset the session for a fresh start
+                from langchain_core.messages import AIMessage, HumanMessage
+
+                # Keep conversation history but clear booking data
+                old_messages = self.state["messages"].copy()
+
+                # Reset state
+                self.initialize_state()
+
+                # Restore conversation history
+                self.state["messages"] = old_messages
+
+                # Add cancellation message
                 self.state["messages"].append(
-                    AIMessage(content="Booking cancelled. Let me know if you'd like to book a different time.")
+                    AIMessage(content="Booking cancelled. No problem!\n\nWould you like to book a meeting for a different date and time?")
                 )
+
+                # Set next action to wait for new booking request
+                self.state["next_action"] = "wait_for_new_booking"
+
+        elif current_action == "wait_for_new_booking":
+            # User is responding after cancellation
+            user_msg_lower = user_message.lower().strip()
+            affirmative_responses = ["yes", "yeah", "yup", "sure", "ok", "okay", "yep", "y"]
+            negative_responses = ["no", "nope", "nah", "n", "cancel", "quit", "exit"]
+
+            if user_msg_lower in affirmative_responses:
+                # User wants to book again - ask for date and time
+                self.state["messages"].append(
+                    AIMessage(content="Great! What date and time would work best for you?")
+                )
+                self.state["next_action"] = "wait_for_user_input"
+            elif user_msg_lower in negative_responses:
+                # User doesn't want to book
+                self.state["messages"].append(
+                    AIMessage(content="No problem! Feel free to reach out when you'd like to book a meeting. Have a great day!")
+                )
+                self.state["next_action"] = ""
+            else:
+                # User provided date/time directly - extract from ONLY the latest message
+                # Create a temporary extraction with only the latest user message
+                temp_messages = [
+                    HumanMessage(content=user_message)
+                ]
+
+                # Extract requirements from just this message
+                prompt = ChatPromptTemplate.from_messages([
+                    ("system", """Extract meeting date and time from this message.
+                    Return JSON with keys: date_preference, time_preference.
+                    If not mentioned, use 'not_specified'."""),
+                    MessagesPlaceholder(variable_name="messages"),
+                ])
+
+                chain = prompt | self.llm
+                response = chain.invoke({"messages": temp_messages})
+
+                try:
+                    import json as json_lib
+                    content = response.content
+                    if "```json" in content:
+                        content = content.split("```json")[1].split("```")[0].strip()
+                    elif "```" in content:
+                        content = content.split("```")[1].split("```")[0].strip()
+
+                    requirements = json_lib.loads(content)
+                    self.state["date_preference"] = requirements.get("date_preference", "not_specified")
+                    self.state["time_preference"] = requirements.get("time_preference", "not_specified")
+                except:
+                    # Extraction failed, set as not specified
+                    self.state["date_preference"] = "not_specified"
+                    self.state["time_preference"] = "not_specified"
+
+                # Check if we have enough info
+                if (self.state.get("date_preference", "not_specified") != "not_specified" or
+                    self.state.get("time_preference", "not_specified") != "not_specified"):
+                    # Got some info, proceed with normal flow
+                    if check_requirements_complete(self.state) == "complete":
+                        self.state = fetch_slots_node(self.state, self.agent_executor)
+                        self.state = select_slot_node(self.state, self.llm)
+                    else:
+                        self.state = ask_for_missing_info_node(self.state, self.llm)
+                else:
+                    # Couldn't extract anything useful
+                    self.state["messages"].append(
+                        AIMessage(content="I didn't catch that. What date and time would you like to schedule the meeting?")
+                    )
+                    self.state["next_action"] = "wait_for_user_input"
 
         else:
             # Initial message or new conversation
@@ -289,3 +403,56 @@ class BookingAgent:
     def reset(self):
         """Reset the agent state."""
         self.state = None
+
+    async def process_message_stream(self, user_message: str):
+        """
+        Process a user message and stream the response with status updates.
+
+        Args:
+            user_message: The user's input message
+
+        Yields:
+            dict: Status updates and response chunks
+        """
+        import asyncio
+        import re
+
+        # Determine current action and send appropriate status
+        current_action = self.state.get("next_action", "") if self.state else ""
+
+        # Send status based on what the agent is doing
+        # Status will remain visible during the blocking process_message() call
+        if current_action == "wait_for_slot_selection":
+            yield {"type": "status", "message": "Processing your selection..."}
+        elif current_action == "wait_for_user_info":
+            yield {"type": "status", "message": "Extracting your information..."}
+        elif current_action == "wait_for_confirmation":
+            yield {"type": "status", "message": "Processing confirmation..."}
+        elif current_action == "wait_for_new_date":
+            yield {"type": "status", "message": "Analyzing date preference..."}
+        elif current_action == "wait_for_time_only":
+            yield {"type": "status", "message": "Fetching available time slots..."}
+        elif current_action == "wait_for_user_input":
+            yield {"type": "status", "message": "Processing your request..."}
+        else:
+            # Check if this is a new booking request
+            if not current_action or current_action == "":
+                yield {"type": "status", "message": "Fetching available time slots..."}
+
+        # Get the full response (blocking - status stays visible during this)
+        response = self.process_message(user_message)
+
+        # Clear status and start streaming response
+        yield {"type": "status", "message": ""}
+
+        # Stream the response word by word while preserving newlines
+        # Split by whitespace but keep newlines as separate tokens
+        parts = re.split(r'(\s+)', response)
+
+        for part in parts:
+            if part:  # Skip empty parts
+                yield {"type": "chunk", "data": part}
+
+                # Add delay only for actual words, not whitespace
+                if not part.isspace():
+                    await asyncio.sleep(0.03)
