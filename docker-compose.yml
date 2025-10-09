@@ -50,7 +50,3 @@ services:
 networks:
   ixora-network:
     driver: bridge
-
-volumes:
-  # Optional: Add volumes if you need to persist data
-  # playwright_cache:
