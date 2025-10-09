@@ -567,21 +567,54 @@ def book_meeting_node(state: AgentState, agent_executor: AgentExecutor) -> Agent
                 AIMessage(
                     content="Your meeting has been successfully booked! You'll receive a confirmation email shortly.")
             )
+            # Clear next_action after successful booking to prevent misinterpretation of follow-up messages
+            state["next_action"] = "booking_complete"
         else:
             state["booking_confirmed"] = False
             error_msg = result.get("error", "Unknown error")
+
+            # Make error message more user-friendly
+            user_friendly_msg = _get_user_friendly_error_message(error_msg)
+
             state["messages"].append(
                 AIMessage(
-                    content=f"There was an issue booking the meeting: {error_msg}. Please try again.")
+                    content=f"There was an issue booking the meeting: {user_friendly_msg}. Please try again.")
             )
     except Exception as e:
         state["booking_confirmed"] = False
+        user_friendly_msg = _get_user_friendly_error_message(str(e))
         state["messages"].append(
             AIMessage(
-                content=f"There was an issue booking the meeting: {str(e)}. Please try again.")
+                content=f"There was an issue booking the meeting: {user_friendly_msg}. Please try again.")
         )
 
     return state
+
+
+def _get_user_friendly_error_message(error_msg: str) -> str:
+    """Convert technical error messages to user-friendly messages."""
+    error_lower = error_msg.lower()
+
+    # Map technical errors to user-friendly messages
+    if "status 400" in error_lower or "bad request" in error_lower:
+        return "The booking information couldn't be processed. Please check your details and try again"
+    elif "status 401" in error_lower or "unauthorized" in error_lower:
+        return "Unable to authenticate with the booking system"
+    elif "status 403" in error_lower or "forbidden" in error_lower:
+        return "Access to the booking system was denied"
+    elif "status 404" in error_lower or "not found" in error_lower:
+        return "The booking service or time slot was not found"
+    elif "status 409" in error_lower or "conflict" in error_lower:
+        return "This time slot may no longer be available. Please choose a different time"
+    elif "status 500" in error_lower or "status 502" in error_lower or "status 503" in error_lower:
+        return "The booking system is temporarily unavailable. Please try again in a few moments"
+    elif "timeout" in error_lower or "timed out" in error_lower:
+        return "The booking request took too long. Please try again"
+    elif "network" in error_lower or "connection" in error_lower:
+        return "Unable to connect to the booking system. Please check your internet connection"
+    else:
+        # For unknown errors, return a generic friendly message
+        return "An unexpected error occurred. Please try again or contact support if the issue persists"
 
 
 def create_booking_graph(llm, agent_executor: AgentExecutor):

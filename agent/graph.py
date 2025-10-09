@@ -315,6 +315,38 @@ class BookingAgent:
                 # Set next action to wait for new booking request
                 self.state["next_action"] = "wait_for_new_booking"
 
+        elif current_action == "booking_complete":
+            # Booking is complete, handle acknowledgment or new booking requests
+            user_msg_lower = user_message.lower().strip()
+
+            # Check for acknowledgment/thanks
+            acknowledgment_phrases = ["thanks", "thank you", "thankyou", "thx", "ty",
+                                     "great", "awesome", "perfect", "appreciate it",
+                                     "ok", "okay", "ok thanks", "okay thanks"]
+
+            if user_msg_lower in acknowledgment_phrases or \
+               any(phrase in user_msg_lower for phrase in ["thank", "appreciate"]):
+                # User is acknowledging - respond politely and offer to help again
+                self.state["messages"].append(
+                    AIMessage(content="You're welcome! Have a great day! If you need to book another meeting, just let me know.")
+                )
+                # Keep the state as booking_complete so further messages are handled appropriately
+                self.state["next_action"] = "booking_complete"
+            else:
+                # Check if user wants to book another meeting
+                booking_keywords = ["book", "schedule", "meeting", "appointment"]
+                if any(keyword in user_msg_lower for keyword in booking_keywords):
+                    # User wants to start a new booking, reset and restart
+                    self.initialize_state()
+                    self.state["messages"].append(HumanMessage(content=user_message))
+                    result = self.workflow.invoke(self.state)
+                    self.state = result
+                else:
+                    # Generic response
+                    self.state["messages"].append(
+                        AIMessage(content="How can I help you today? Would you like to book another meeting?")
+                    )
+
         elif current_action == "wait_for_new_booking":
             # User is responding after cancellation
             user_msg_lower = user_message.lower().strip()
