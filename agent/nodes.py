@@ -1,11 +1,13 @@
 """LangGraph agent nodes for meeting booking workflow."""
 
 import json
-from typing import TypedDict, Annotated, Literal
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from typing import Annotated, Literal, TypedDict
+
 from langchain.agents import AgentExecutor, create_tool_calling_agent
-from langgraph.graph import StateGraph, END
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langgraph.graph import END, StateGraph
+
 from agent.tools import get_all_tools
 
 
@@ -57,15 +59,21 @@ def extract_requirements_node(state: AgentState, llm) -> AgentState:
 
         requirements = json.loads(content)
 
-        state["date_preference"] = requirements.get("date_preference", "not_specified")
-        state["time_preference"] = requirements.get("time_preference", "not_specified")
-        state["meeting_purpose"] = requirements.get("meeting_purpose", "not_specified")
+        state["date_preference"] = requirements.get(
+            "date_preference", "not_specified")
+        state["time_preference"] = requirements.get(
+            "time_preference", "not_specified")
+        state["meeting_purpose"] = requirements.get(
+            "meeting_purpose", "not_specified")
 
     except Exception as e:
         # If parsing fails, keep as not_specified
-        state["date_preference"] = state.get("date_preference", "not_specified")
-        state["time_preference"] = state.get("time_preference", "not_specified")
-        state["meeting_purpose"] = state.get("meeting_purpose", "not_specified")
+        state["date_preference"] = state.get(
+            "date_preference", "not_specified")
+        state["time_preference"] = state.get(
+            "time_preference", "not_specified")
+        state["meeting_purpose"] = state.get(
+            "meeting_purpose", "not_specified")
 
     return state
 
@@ -90,7 +98,7 @@ def ask_for_missing_info_node(state: AgentState, llm) -> AgentState:
     if state.get("time_preference", "not_specified") == "not_specified":
         missing_fields.append("time")
 
-    prompt = f"To book a meeting, I need some more information. What {' and '.join(missing_fields)} would work best for you?"
+    prompt = f"I am a meeting booking agent, I need some more information. What {' and '.join(missing_fields)} would work best for you?"
 
     state["messages"].append(AIMessage(content=prompt))
     state["next_action"] = "wait_for_user_input"
@@ -139,7 +147,8 @@ def fetch_slots_node(state: AgentState, agent_executor: AgentExecutor) -> AgentS
                     if isinstance(tool_output, str):
                         try:
                             slots_data = json.loads(tool_output)
-                            state["available_slots"] = slots_data.get("slots", [])
+                            state["available_slots"] = slots_data.get(
+                                "slots", [])
                         except:
                             pass
     except Exception as e:
@@ -165,7 +174,8 @@ def select_slot_node(state: AgentState, llm) -> AgentState:
 
     if not available_slots:
         state["messages"].append(
-            AIMessage(content="No available slots found for your preferred date. Would you like to try a different date?")
+            AIMessage(
+                content="No available slots found for your preferred date. Would you like to try a different date ?")
         )
         state["next_action"] = "wait_for_new_date"
         return state
@@ -190,7 +200,8 @@ def select_slot_node(state: AgentState, llm) -> AgentState:
                 # Auto-select this slot
                 state["selected_slot"] = slot
                 state["messages"].append(
-                    AIMessage(content=f"Great! I found a slot at {slot_time} on your preferred date.")
+                    AIMessage(
+                        content=f"Great! I found a slot at {slot_time} on your preferred date.")
                 )
                 state["next_action"] = "collect_user_info"
                 return state
@@ -230,7 +241,8 @@ def process_slot_selection_node(state: AgentState, llm) -> AgentState:
         if 1 <= slot_number <= len(available_slots):
             state["selected_slot"] = available_slots[slot_number - 1]
             state["messages"].append(
-                AIMessage(content=f"Perfect! You've selected the {available_slots[slot_number - 1].get('time')} slot.")
+                AIMessage(
+                    content=f"Perfect! You've selected the {available_slots[slot_number - 1].get('time')} slot.")
             )
             state["next_action"] = "collect_user_info"
             return state
@@ -264,13 +276,15 @@ def process_slot_selection_node(state: AgentState, llm) -> AgentState:
         selected = json.loads(content)
         state["selected_slot"] = selected
         state["messages"].append(
-            AIMessage(content=f"Great! You've selected the {selected.get('time')} slot.")
+            AIMessage(
+                content=f"Great! You've selected the {selected.get('time')} slot.")
         )
         state["next_action"] = "collect_user_info"
     except:
         # If parsing fails, ask again
         state["messages"].append(
-            AIMessage(content="I couldn't understand your selection. Please choose a slot number (e.g., '1', '2') or try again.")
+            AIMessage(
+                content="I couldn't understand your selection. Please choose a slot number (e.g., '1', '2') or try again.")
         )
         state["next_action"] = "wait_for_slot_selection"
 
@@ -326,8 +340,8 @@ def collect_user_info_node(state: AgentState, llm) -> AgentState:
 
 def extract_user_info_node(state: AgentState, llm) -> AgentState:
     """Extract user information from messages."""
-    import re
     import logging
+    import re
 
     logger = logging.getLogger(__name__)
     messages = state["messages"]
@@ -363,9 +377,11 @@ def extract_user_info_node(state: AgentState, llm) -> AgentState:
             # Remove email and phone from the message
             text_without_email_phone = last_user_msg
             if email_match:
-                text_without_email_phone = text_without_email_phone.replace(email_match.group(0), '')
+                text_without_email_phone = text_without_email_phone.replace(
+                    email_match.group(0), '')
             if phone_match:
-                text_without_email_phone = text_without_email_phone.replace(phone_match.group(0), '')
+                text_without_email_phone = text_without_email_phone.replace(
+                    phone_match.group(0), '')
 
             # Clean up and extract name
             # Remove common separators and extra whitespace
@@ -376,7 +392,8 @@ def extract_user_info_node(state: AgentState, llm) -> AgentState:
                 state["user_name"] = name_text
                 logger.info(f"Extracted name: {state['user_name']}")
 
-            logger.info(f"After regex extraction - Name: {state.get('user_name')}, Email: {state.get('user_email')}, Phone: {state.get('user_phone')}")
+            logger.info(
+                f"After regex extraction - Name: {state.get('user_name')}, Email: {state.get('user_email')}, Phone: {state.get('user_phone')}")
 
     # If regex extraction didn't get everything, try LLM extraction
     if not all([state.get("user_name"), state.get("user_email"), state.get("user_phone")]):
@@ -395,7 +412,8 @@ def extract_user_info_node(state: AgentState, llm) -> AgentState:
         ])
 
         chain = prompt | llm
-        response = chain.invoke({"messages": messages[-3:]})  # Only use last 3 messages for context
+        # Only use last 3 messages for context
+        response = chain.invoke({"messages": messages[-3:]})
 
         try:
             content = response.content
@@ -453,8 +471,9 @@ def check_confirmation(state: AgentState, llm) -> Literal["confirmed", "declined
 
 def book_meeting_node(state: AgentState, agent_executor: AgentExecutor) -> AgentState:
     """Execute the booking."""
-    from agent.tools import BookMeetingTool
     import json
+
+    from agent.tools import BookMeetingTool
 
     selected_slot = state.get("selected_slot", {})
     slot_time = selected_slot.get("time", "")
@@ -479,18 +498,21 @@ def book_meeting_node(state: AgentState, agent_executor: AgentExecutor) -> Agent
         if result.get("success"):
             state["booking_confirmed"] = True
             state["messages"].append(
-                AIMessage(content="Your meeting has been successfully booked! You'll receive a confirmation email shortly.")
+                AIMessage(
+                    content="Your meeting has been successfully booked! You'll receive a confirmation email shortly.")
             )
         else:
             state["booking_confirmed"] = False
             error_msg = result.get("error", "Unknown error")
             state["messages"].append(
-                AIMessage(content=f"There was an issue booking the meeting: {error_msg}. Please try again.")
+                AIMessage(
+                    content=f"There was an issue booking the meeting: {error_msg}. Please try again.")
             )
     except Exception as e:
         state["booking_confirmed"] = False
         state["messages"].append(
-            AIMessage(content=f"There was an issue booking the meeting: {str(e)}. Please try again.")
+            AIMessage(
+                content=f"There was an issue booking the meeting: {str(e)}. Please try again.")
         )
 
     return state
@@ -502,14 +524,21 @@ def create_booking_graph(llm, agent_executor: AgentExecutor):
     workflow = StateGraph(AgentState)
 
     # Add nodes with llm/agent_executor bound
-    workflow.add_node("extract_requirements", lambda s: extract_requirements_node(s, llm))
-    workflow.add_node("ask_missing_info", lambda s: ask_for_missing_info_node(s, llm))
-    workflow.add_node("fetch_slots", lambda s: fetch_slots_node(s, agent_executor))
+    workflow.add_node("extract_requirements",
+                      lambda s: extract_requirements_node(s, llm))
+    workflow.add_node("ask_missing_info",
+                      lambda s: ask_for_missing_info_node(s, llm))
+    workflow.add_node(
+        "fetch_slots", lambda s: fetch_slots_node(s, agent_executor))
     workflow.add_node("select_slot", lambda s: select_slot_node(s, llm))
-    workflow.add_node("collect_user_info", lambda s: collect_user_info_node(s, llm))
-    workflow.add_node("extract_user_info", lambda s: extract_user_info_node(s, llm))
-    workflow.add_node("confirm_booking", lambda s: confirm_booking_node(s, llm))
-    workflow.add_node("book_meeting", lambda s: book_meeting_node(s, agent_executor))
+    workflow.add_node("collect_user_info",
+                      lambda s: collect_user_info_node(s, llm))
+    workflow.add_node("extract_user_info",
+                      lambda s: extract_user_info_node(s, llm))
+    workflow.add_node("confirm_booking",
+                      lambda s: confirm_booking_node(s, llm))
+    workflow.add_node(
+        "book_meeting", lambda s: book_meeting_node(s, agent_executor))
 
     # Define edges
     workflow.set_entry_point("extract_requirements")
@@ -529,7 +558,8 @@ def create_booking_graph(llm, agent_executor: AgentExecutor):
 
     workflow.add_conditional_edges(
         "collect_user_info",
-        lambda s: "extract" if s.get("next_action") == "wait_for_user_info" else "confirm",
+        lambda s: "extract" if s.get(
+            "next_action") == "wait_for_user_info" else "confirm",
         {
             "extract": END,  # Wait for user to provide info
             "confirm": "confirm_booking"

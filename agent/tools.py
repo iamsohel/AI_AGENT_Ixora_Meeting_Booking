@@ -85,9 +85,12 @@ class BookMeetingInput(BaseModel):
     slot_time: str = Field(
         description="The time slot to book (e.g., '2:00 PM', '14:00', '10:00 AM')"
     )
-    name: str = Field(description="Full name of the person booking the meeting")
-    email: str = Field(description="Email address of the person booking the meeting")
-    phone: str = Field(description="Phone number of the person booking the meeting")
+    name: str = Field(
+        description="Full name of the person booking the meeting")
+    email: str = Field(
+        description="Email address of the person booking the meeting")
+    phone: str = Field(
+        description="Phone number of the person booking the meeting")
     notes: Optional[str] = Field(
         default="",
         description="Optional notes or meeting purpose"
@@ -181,7 +184,8 @@ class BookMeetingTool(BaseTool):
             #     headless=True
             # )
 
-            result = book_appointment_sync(parsed_date, slot_time, name, email, phone, notes)
+            result = book_appointment_sync(
+                parsed_date, slot_time, name, email, phone, notes)
 
             logger.info(f"Browser booking result: {result.get('success')}")
             return json.dumps(result, indent=2)
@@ -207,7 +211,8 @@ class BookMeetingTool(BaseTool):
 class ValidateUserInfoInput(BaseModel):
     """Input for ValidateUserInfoTool."""
     email: str = Field(description="Email address to validate")
-    phone: Optional[str] = Field(default=None, description="Phone number to validate")
+    phone: Optional[str] = Field(
+        default=None, description="Phone number to validate")
 
 
 class ValidateUserInfoTool(BaseTool):
@@ -371,7 +376,8 @@ class ParseDateTool(BaseTool):
                             target_date = target_date.replace(year=today.year)
                         # If the parsed date is in the past, assume next year
                         if target_date < today and target_date.year == today.year:
-                            target_date = target_date.replace(year=today.year + 1)
+                            target_date = target_date.replace(
+                                year=today.year + 1)
                         break
                     except ValueError:
                         continue
@@ -389,10 +395,10 @@ class ParseDateTool(BaseTool):
 
         except Exception as e:
             return json.dumps({
-                "error": f"Failed to parse date: {str(e)}"
+                "error": f"Failed to parse date : {str(e)}"
             })
 
-    async def _arun(self, date_string: str) -> str:
+    async def _arun(self, date_string:  str) -> str:
         """Async implementation."""
         return self._run(date_string)
 

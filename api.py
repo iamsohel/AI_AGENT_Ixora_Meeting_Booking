@@ -2,14 +2,14 @@
 
 import os
 import uuid
-from typing import Dict, Optional
 from datetime import datetime, timedelta
+from typing import Dict, Optional
 
-from fastapi import FastAPI, HTTPException, Body
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from dotenv import load_dotenv
+from fastapi import Body, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel
 
 from agent.graph import BookingAgent
 
@@ -26,7 +26,8 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # React dev servers
+    allow_origins=["http://localhost:3000",
+                   "http://localhost:5173"],  # React dev servers
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -76,7 +77,7 @@ def get_or_create_agent(session_id: str) -> BookingAgent:
     if session_id not in sessions:
         # Create new agent
         llm = ChatGoogleGenerativeAI(
-            model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp"),
+            model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
             temperature=float(os.getenv("TEMPERATURE", "0.7")),
             google_api_key=os.getenv("GOOGLE_API_KEY")
         )
