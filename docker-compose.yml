@@ -1,6 +1,41 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database Service
+  postgres:
+    image: postgres:15-alpine
+    container_name: ixora-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ixora_chat}
+      POSTGRES_USER: ${POSTGRES_USER:-ixora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ixora-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ixora}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Service (Session Management)
+  redis:
+    image: redis:7-alpine
+    container_name: ixora-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme}
+    volumes:
+      - redis_data:/data
+    networks:
+      - ixora-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Backend API Service
   backend:
     build:
@@ -11,10 +46,34 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # LLM Configuration
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - TEMPERATURE=${TEMPERATURE:-0.7}
+      # Booking Configuration
       - IXORA_BOOKING_URL=${IXORA_BOOKING_URL}
+      # Database Configuration
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-ixora}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-ixora_chat}
+      # Redis Configuration
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      # RAG Configuration (Gemini Embeddings)
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-models/embedding-001}
+      - CHROMA_PERSIST_DIRECTORY=/app/chroma_db
+      # Admin Configuration
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-secret-key-change-in-production}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme123}
     env_file:
       - .env
+    volumes:
+      - chroma_data:/app/chroma_db
+      - documents:/app/documents
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - ixora-network
     healthcheck:
@@ -35,6 +94,7 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
     depends_on:
       backend:
         condition: service_healthy
@@ -50,3 +110,15 @@ services:
 networks:
   ixora-network:
     driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  chroma_data:
+    driver: local
+  documents:
+    driver: local
+  uploads:
+    driver: local

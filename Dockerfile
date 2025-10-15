@@ -21,16 +21,19 @@ WORKDIR /app
 # Install uv for faster dependency management
 RUN pip install uv
 
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
+# Copy dependency files from backend
+COPY backend/pyproject.toml backend/uv.lock ./
 
 # Install dependencies
 RUN uv sync --frozen
 
-# Copy application code
-COPY --chown=appuser:appuser agent/ ./agent/
-COPY --chown=appuser:appuser utils/ ./utils/
-COPY --chown=appuser:appuser api.py ./
+# Copy application code from backend
+COPY --chown=appuser:appuser backend/agent/ ./agent/
+COPY --chown=appuser:appuser backend/rag/ ./rag/
+COPY --chown=appuser:appuser backend/database/ ./database/
+COPY --chown=appuser:appuser backend/admin/ ./admin/
+COPY --chown=appuser:appuser backend/utils/ ./utils/
+COPY --chown=appuser:appuser backend/api.py backend/admin_api.py ./
 
 # Install Playwright dependencies for browser automation
 RUN uv run playwright install --with-deps chromium

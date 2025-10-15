@@ -102,24 +102,49 @@ This project is an AI-powered conversational agent built with **LangChain** and 
 
 ```
 ixora-meeting-booking/
-├── agent/
-│   ├── __init__.py
-│   ├── graph.py                 # LangGraph state machine controller
-│   ├── nodes.py                 # Workflow step implementations
-│   └── tools.py                 # LangChain tools (AI-callable functions)
-├── utils/
-│   ├── __init__.py
-│   ├── api_booking.py           # Direct API booking via HTTP
-│   ├── api_with_session.py      # Session-based API client
-│   └── browser_automation.py    # Playwright web scraping
-├── main.py                      # Application entry point
-├── pyproject.toml               # Project dependencies
-├── .env.example                 # Environment variables template
-├── .gitignore                   # Git ignore rules
+├── backend/                     # Python FastAPI Backend
+│   ├── agent/                   # LangChain agent logic
+│   │   ├── graph.py             # LangGraph state machine controller
+│   │   ├── nodes.py             # Workflow step implementations
+│   │   ├── tools.py             # LangChain tools (AI-callable functions)
+│   │   ├── unified_agent.py     # Unified RAG + Booking agent
+│   │   ├── supervisor.py        # Intent classification supervisor
+│   │   └── rag_nodes.py         # RAG workflow nodes
+│   ├── database/                # Database models & logging
+│   │   ├── models.py            # SQLAlchemy models
+│   │   ├── database.py          # Database connection
+│   │   └── chat_logger.py       # Chat session logging
+│   ├── rag/                     # RAG functionality
+│   │   ├── document_loader.py   # PDF document processing
+│   │   ├── vector_store.py      # ChromaDB vector storage
+│   │   └── rag_chain.py         # RAG query chain
+│   ├── utils/                   # Utility functions
+│   │   ├── api_booking.py       # Direct API booking via HTTP
+│   │   ├── cache.py             # Caching utilities
+│   │   └── llm_tracker.py       # LLM usage tracking
+│   ├── admin/                   # Admin authentication
+│   │   └── auth.py              # JWT authentication
+│   ├── tests/                   # Backend tests
+│   ├── api.py                   # Main FastAPI application
+│   ├── admin_api.py             # Admin API endpoints
+│   ├── pyproject.toml           # Python dependencies
+│   └── start_api.sh             # API start script
+│
+├── frontend/                    # React Frontend
+│   ├── src/                     # React components
+│   │   ├── App.jsx              # Main application component
+│   │   └── ...
+│   ├── package.json             # Node dependencies
+│   └── vite.config.js           # Vite configuration
+│
+├── docker-compose.yml           # Docker orchestration
+├── Dockerfile                   # Backend Docker image
+├── .env                         # Environment variables
 ├── README.md                    # This file
-├── ARCHITECTURE_EXPLANATION.md  # Detailed architecture documentation
-└── uv.lock                      # Dependency lock file
+└── STRUCTURE.md                 # Detailed structure documentation
 ```
+
+For more details, see [STRUCTURE.md](STRUCTURE.md).
 
 ---
 
@@ -180,14 +205,40 @@ ixora-meeting-booking/
 
 ---
 
-## 🏃 Running the Agent
+## 🏃 Running the Application
 
-### Interactive Mode (Default)
+### Development Mode
 
-Start a conversation with the agent:
+**Backend API:**
+```bash
+cd backend
+uv run python api.py
+# API runs on http://localhost:8000
+# Docs available at http://localhost:8000/docs
+```
+
+**Frontend:**
+```bash
+cd frontend
+npm run dev
+# Frontend runs on http://localhost:3000 or 3001
+```
+
+### Production Mode (Docker)
 
 ```bash
-python main.py
+docker-compose up -d
+# Backend: http://localhost:8000
+# Frontend: http://localhost:80
+```
+
+### Legacy Interactive Mode (Command Line Agent)
+
+For the original command-line booking agent:
+
+```bash
+cd backend
+python main.py  # If main.py exists
 ```
 
 **Example conversation:**
