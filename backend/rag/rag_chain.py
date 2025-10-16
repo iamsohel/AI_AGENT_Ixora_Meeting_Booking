@@ -5,9 +5,9 @@ from typing import Dict, List
 
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, AIMessage
 
 from .vector_store import get_retriever
 
@@ -34,27 +34,29 @@ def create_rag_chain():
     # Create the system prompt
     system_prompt = """You are a helpful AI assistant for Ixora Solution, a full-cycle offshore software development company based in Bangladesh.
 
-Use the following context from the company's documentation to answer questions about Ixora Solution's services, solutions, and capabilities.
+        Use the following context from the company's documentation to answer questions about Ixora Solution's services, solutions, and capabilities.
 
-Context:
-{context}
+        Context:
+        {context}
 
-Instructions:
-- Provide accurate, professional, and friendly responses about Ixora Solution
-- If the answer is found in the context, use it to provide a detailed response
-- If the question is about booking a meeting or scheduling an appointment, politely let the user know you can help them book a meeting with Ixora's team
-- If you don't find relevant information in the context, politely say you don't have that specific information
-- Always maintain a professional tone that reflects Ixora's commitment to quality and customer service
-- Be concise but informative
+        Instructions:
+        - Provide accurate, professional, and friendly responses about Ixora Solution
+        - If the answer is found in the context, use it to provide a detailed response
+        - If the question is about booking a meeting or scheduling an appointment, politely let the user know you can help them book a meeting with Ixora's team
+        - If you don't find relevant information in the context, politely say you don't have that specific information
+        - Always maintain a professional tone that reflects Ixora's commitment to quality and customer service
+        - Be concise but informative
 
-Remember: You represent Ixora Solution, so always be helpful and showcase the company's expertise."""
+        Remember: You represent Ixora Solution, so always be helpful and showcase the company's expertise."""
 
     # Create the prompt template
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        MessagesPlaceholder(variable_name="chat_history", optional=True),
-        ("human", "{input}"),
-    ])
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            MessagesPlaceholder(variable_name="chat_history", optional=True),
+            ("human", "{input}"),
+        ]
+    )
 
     # Create the document chain
     question_answer_chain = create_stuff_documents_chain(llm, prompt)
@@ -65,10 +67,7 @@ Remember: You represent Ixora Solution, so always be helpful and showcase the co
     return rag_chain
 
 
-def query_rag(
-    question: str,
-    chat_history: List[Dict] | None = None
-) -> Dict:
+def query_rag(question: str, chat_history: List[Dict] | None = None) -> Dict:
     """
     Query the RAG system with a question.
 
@@ -91,19 +90,13 @@ def query_rag(
                 formatted_history.append(AIMessage(content=msg["content"]))
 
     # Run the chain
-    result = chain.invoke({
-        "input": question,
-        "chat_history": formatted_history
-    })
+    result = chain.invoke({"input": question, "chat_history": formatted_history})
 
     return {
         "answer": result["answer"],
         "context": result.get("context", []),
         "source_documents": [
-            {
-                "content": doc.page_content,
-                "metadata": doc.metadata
-            }
+            {"content": doc.page_content, "metadata": doc.metadata}
             for doc in result.get("context", [])
-        ]
+        ],
     }

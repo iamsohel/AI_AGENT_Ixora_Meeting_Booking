@@ -1,5 +1,6 @@
 """Script to add documents using local HuggingFace embeddings (no API required)."""
 
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -14,6 +15,34 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from rag.document_loader import load_and_chunk_documents
 
 load_dotenv()
+
+
+def add_chunk_metadata(chunks, source_file: str):
+    """
+    Add metadata to each chunk for duplicate prevention.
+
+    Metadata includes:
+    - source file name
+    - page number
+    - chunk_index
+    - content hash (optional, for edits within a page)
+    """
+    new_chunks = []
+    for page_num, chunk in enumerate(chunks):
+        chunk_index = getattr(
+            chunk, "chunk_index", 0
+        )  # fallback if chunk_index not set
+        content_hash = hashlib.md5(chunk.page_content.encode()).hexdigest()
+        chunk.metadata.update(
+            {
+                "source": Path(source_file).name,
+                "page": page_num + 1,
+                "chunk_index": chunk_index,
+                "chunk_id": content_hash,
+            }
+        )
+        new_chunks.append(chunk)
+    return new_chunks
 
 
 def add_pdf_with_local_embeddings(pdf_path: str, model_name: str = "all-MiniLM-L6-v2"):
@@ -34,14 +63,13 @@ def add_pdf_with_local_embeddings(pdf_path: str, model_name: str = "all-MiniLM-L
         return False
 
     print(f"\n1. Loading and chunking {pdf_path}...")
-    print(f"   File size: {Path(pdf_path).stat().st_size / (1024*1024):.2f} MB")
+    print(f"   File size: {Path(pdf_path).stat().st_size / (1024 * 1024):.2f} MB")
 
     try:
         chunks = load_and_chunk_documents(
-            file_path=pdf_path,
-            chunk_size=1000,
-            chunk_overlap=200
+            file_path=pdf_path, chunk_size=1000, chunk_overlap=200
         )
+        chunks = add_chunk_metadata(chunks, pdf_path)
         print(f"   ✅ Created {len(chunks)} chunks from document")
     except Exception as e:
         print(f"❌ Error loading document: {e}")
@@ -54,8 +82,8 @@ def add_pdf_with_local_embeddings(pdf_path: str, model_name: str = "all-MiniLM-L
     try:
         embeddings = HuggingFaceEmbeddings(
             model_name=model_name,
-            model_kwargs={'device': 'cpu'},  # Use 'cuda' if you have GPU
-            encode_kwargs={'normalize_embeddings': True}
+            model_kwargs={"device": "cpu"},  # Use 'cuda' if you have GPU
+            encode_kwargs={"normalize_embeddings": True},
         )
         print("   ✅ Local embeddings ready (running on CPU)")
     except Exception as e:
@@ -65,8 +93,8 @@ def add_pdf_with_local_embeddings(pdf_path: str, model_name: str = "all-MiniLM-L
         try:
             embeddings = HuggingFaceEmbeddings(
                 model_name=model_name,
-                model_kwargs={'device': 'cpu'},
-                encode_kwargs={'normalize_embeddings': True}
+                model_kwargs={"device": "cpu"},
+                encode_kwargs={"normalize_embeddings": True},
             )
             print("   ✅ Local embeddings ready")
         except Exception as e2:
@@ -82,39 +110,70 @@ def add_pdf_with_local_embeddings(pdf_path: str, model_name: str = "all-MiniLM-L
         if os.path.exists(persist_directory):
             # Load existing store
             vector_store = Chroma(
-                persist_directory=persist_directory,
-                embedding_function=embeddings
+                persist_directory=persist_directory, embedding_function=embeddings
             )
             current_count = vector_store._collection.count()
             print(f"   Current documents: {current_count}")
 
+            # Prevent duplicate embeddings
+            print("\n3. Filtering out already embedded chunks...")
+            try:
+                existing_metadatas = vector_store.get(include=["metadatas"])[
+                    "metadatas"
+                ]
+                existing_ids = {
+                    m["chunk_id"] for m in existing_metadatas if "chunk_id" in m
+                }
+                new_chunks = [
+                    c for c in chunks if c.metadata["chunk_id"] not in existing_ids
+                ]
+                print(
+                    f"   {len(new_chunks)}/{len(chunks)} chunks are new and will be added"
+                )
+            except Exception as e:
+                print(f"❌ Error filtering duplicates: {e}")
+                return False
+
+            if not new_chunks:
+                print("   ✅ No new chunks to add. Exiting.")
+                return True
+
             # Add new documents
-            print(f"\n4. Adding {len(chunks)} new chunks (this may take a few minutes)...")
+            print(
+                f"\n4. Adding {len(chunks)} new chunks (this may take a few minutes)..."
+            )
             total = len(chunks)
             for i in range(0, total, 5):
-                batch = chunks[i:i+5]
+                batch = chunks[i : i + 5]
                 vector_store.add_documents(batch)
                 progress = min(i + 5, total)
-                print(f"   Progress: {progress}/{total} chunks added ({progress*100//total}%)")
+                print(
+                    f"   Progress: {progress}/{total} chunks added ({progress * 100 // total}%)"
+                )
 
             new_count = vector_store._collection.count()
-            print(f"   ✅ Total documents now: {new_count} (added {new_count - current_count})")
+            print(
+                f"   ✅ Total documents now: {new_count} (added {new_count - current_count})"
+            )
 
         else:
             # Create new vector store
             print("   Creating new vector store...")
-            print(f"   Processing {len(chunks)} chunks (this may take a few minutes)...")
+            print(
+                f"   Processing {len(chunks)} chunks (this may take a few minutes)..."
+            )
 
             vector_store = Chroma.from_documents(
                 documents=chunks,
                 embedding=embeddings,
-                persist_directory=persist_directory
+                persist_directory=persist_directory,
             )
             print(f"   ✅ Created with {len(chunks)} documents")
 
     except Exception as e:
         print(f"❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -129,12 +188,11 @@ def add_pdf_with_local_embeddings(pdf_path: str, model_name: str = "all-MiniLM-L
     for i, doc in enumerate(results, 1):
         print(f"Chunk {i}:")
         print(f"{doc.page_content[:150]}...")
-        source_file = doc.metadata.get('source', 'N/A')
+        source_file = doc.metadata.get("source", "N/A")
         print(f"Source: {Path(source_file).name}\n")
 
     print("=" * 60)
     print("✅ Document added successfully with LOCAL embeddings!")
-
 
     return True
 
@@ -143,11 +201,18 @@ def main():
     """Main function."""
     import argparse
 
-    parser = argparse.ArgumentParser(description='Add PDF using local embeddings')
-    parser.add_argument('pdf_path', nargs='?', default='ixora_general.pdf',
-                        help='Path to PDF file (default: ixora_general.pdf)')
-    parser.add_argument('--model', default='all-MiniLM-L6-v2',
-                        help='HuggingFace model (default: all-MiniLM-L6-v2)')
+    parser = argparse.ArgumentParser(description="Add PDF using local embeddings")
+    parser.add_argument(
+        "pdf_path",
+        nargs="?",
+        default="ixora_general.pdf",
+        help="Path to PDF file (default: ixora_general.pdf)",
+    )
+    parser.add_argument(
+        "--model",
+        default="all-MiniLM-L6-v2",
+        help="HuggingFace model (default: all-MiniLM-L6-v2)",
+    )
 
     args = parser.parse_args()
 

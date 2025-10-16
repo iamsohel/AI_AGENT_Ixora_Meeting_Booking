@@ -1,8 +1,9 @@
 import axios from "axios";
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import "../App.css";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://10.5.5.116:8000";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 function ChatWidget() {
   const [messages, setMessages] = useState([]);
@@ -72,7 +73,10 @@ function ChatWidget() {
   };
 
   const sendMessage = async (e) => {
-    e.preventDefault();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (!inputMessage.trim() || !sessionId || isLoading) return;
 
     const userMessage = inputMessage.trim();
@@ -111,6 +115,7 @@ function ChatWidget() {
           message: userMessage,
           session_id: sessionId,
         }),
+        mode: "cors", // ✅ add this
       });
 
       if (!response.ok) {
@@ -255,7 +260,11 @@ function ChatWidget() {
             <div key={index} className={`message ${msg.type}`}>
               <div className="message-content">
                 <div className="message-text">
-                  {msg.text}
+                  {msg.type === "agent" || msg.type === "assistant" ? (
+                    <ReactMarkdown>{msg.text}</ReactMarkdown>
+                  ) : (
+                    msg.text
+                  )}
                   {msg.isStreaming && statusMessage && (
                     <div className="status-message">
                       <span className="status-icon">⏳</span> {statusMessage}
@@ -297,7 +306,7 @@ function ChatWidget() {
               className="message-input"
               autoFocus
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   if (inputMessage.trim() && sessionId && !isLoading) {
                     sendMessage(e);
@@ -307,7 +316,12 @@ function ChatWidget() {
             />
             {inputMessage.trim() && (
               <button
-                type="submit"
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  sendMessage(e);
+                }}
                 disabled={!sessionId || isLoading}
                 className="send-icon-btn"
                 aria-label="Send message"

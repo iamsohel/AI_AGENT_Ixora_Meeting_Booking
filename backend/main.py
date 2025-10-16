@@ -6,6 +6,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, Optional
 
 import admin_api
@@ -16,7 +17,8 @@ from database.models import ChatSession
 from dotenv import load_dotenv
 from fastapi import Body, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -38,8 +40,25 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 app = FastAPI(
     title="Ixora AI Assistant API",
     description="AI-powered assistant with RAG (company info) and meeting booking capabilities",
-    version="2.0.0"
+    version="2.0.0",
 )
+
+# Path to React build folder
+build_path = Path(__file__).parent.parent / "frontend" / "dist"
+
+
+# Mount static files (JS, CSS, images)
+app.mount("/assets", StaticFiles(directory=build_path / "assets"), name="assets")
+
+
+# Serve index.html for SPA routes
+@app.get("/{full_path:path}")
+async def serve_react(full_path: str):
+    index_file = build_path / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return {"error": "index.html not found"}
+
 
 # Include admin router
 app.include_router(admin_api.router)
@@ -47,8 +66,7 @@ app.include_router(admin_api.router)
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000",
-                   "http://localhost:3001", "http://10.5.5.116:3000", "http://127.0.0.1:5500"],  # React dev servers
+    allow_origins=["*"],  # React dev servers and demo.html server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -63,12 +81,14 @@ SESSION_TIMEOUT_MINUTES = 300
 
 class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
+
     message: str
     session_id: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
+
     message: str
     session_id: str
     timestamp: str
@@ -76,6 +96,7 @@ class ChatResponse(BaseModel):
 
 class SessionResponse(BaseModel):
     """Response model for session creation."""
+
     session_id: str
     message: str
 
@@ -84,7 +105,8 @@ def cleanup_old_sessions():
     """Remove sessions older than SESSION_TIMEOUT_MINUTES."""
     cutoff_time = datetime.now() - timedelta(minutes=SESSION_TIMEOUT_MINUTES)
     expired_sessions = [
-        sid for sid, data in sessions.items()
+        sid
+        for sid, data in sessions.items()
         if data.get("last_activity", datetime.now()) < cutoff_time
     ]
     for sid in expired_sessions:
@@ -100,7 +122,7 @@ def get_or_create_agent(session_id: str) -> UnifiedAgent:
         llm = ChatGoogleGenerativeAI(
             model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
             temperature=float(os.getenv("TEMPERATURE", "0.7")),
-            google_api_key=os.getenv("GOOGLE_API_KEY")
+            google_api_key=os.getenv("GOOGLE_API_KEY"),
         )
         agent = UnifiedAgent(llm)
         agent.initialize_state()
@@ -108,7 +130,7 @@ def get_or_create_agent(session_id: str) -> UnifiedAgent:
         sessions[session_id] = {
             "agent": agent,
             "created_at": datetime.now(),
-            "last_activity": datetime.now()
+            "last_activity": datetime.now(),
         }
     else:
         # Update last activity
@@ -124,7 +146,7 @@ async def root():
         "name": "Ixora AI Assistant API",
         "version": "2.0.0",
         "status": "running",
-        "capabilities": ["RAG (company info)", "Meeting booking"]
+        "capabilities": ["RAG (company info)", "Meeting booking"],
     }
 
 
@@ -134,7 +156,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "active_sessions": len(sessions)
+        "active_sessions": len(sessions),
     }
 
 
@@ -147,8 +169,7 @@ async def create_session():
     get_or_create_agent(session_id)
 
     return SessionResponse(
-        session_id=session_id,
-        message="Session created successfully"
+        session_id=session_id, message="Session created successfully"
     )
 
 
@@ -172,9 +193,7 @@ async def chat(request: ChatRequest = Body(...), db: Session = Depends(get_db)):
         with ChatLogger(db) as logger:
             logger.create_session(session_id)
             logger.log_message(
-                session_id=session_id,
-                role="user",
-                content=request.message
+                session_id=session_id, role="user", content=request.message
             )
 
         # Get or create agent for this session
@@ -187,10 +206,10 @@ async def chat(request: ChatRequest = Body(...), db: Session = Depends(get_db)):
         with ChatLogger(db) as logger:
             # Get agent mode from state
             agent_mode = agent.state.get("agent_mode") if agent.state else None
-            intent_classification = agent.state.get(
-                "intent_classification") if agent.state else None
-            rag_sources = agent.state.get(
-                "rag_sources") if agent.state else None
+            intent_classification = (
+                agent.state.get("intent_classification") if agent.state else None
+            )
+            rag_sources = agent.state.get("rag_sources") if agent.state else None
 
             logger.log_message(
                 session_id=session_id,
@@ -198,37 +217,36 @@ async def chat(request: ChatRequest = Body(...), db: Session = Depends(get_db)):
                 content=response_message,
                 agent_mode=agent_mode,
                 intent_classification=intent_classification,
-                rag_sources=rag_sources
+                rag_sources=rag_sources,
             )
 
             # Update booking info if applicable
             if agent.state:
                 logger.update_session_booking_info(
                     session_id=session_id,
-                    booking_completed=agent.state.get(
-                        "booking_confirmed", False),
+                    booking_completed=agent.state.get("booking_confirmed", False),
                     booking_date=agent.state.get("date_preference"),
-                    booking_time=agent.state.get(
-                        "selected_slot", {}).get("time"),
+                    booking_time=agent.state.get("selected_slot", {}).get("time"),
                     user_name=agent.state.get("user_name"),
                     user_email=agent.state.get("user_email"),
-                    user_phone=agent.state.get("user_phone")
+                    user_phone=agent.state.get("user_phone"),
                 )
 
         return ChatResponse(
             message=response_message,
             session_id=session_id,
-            timestamp=datetime.now().isoformat()
+            timestamp=datetime.now().isoformat(),
         )
 
     except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Error processing message: {str(e)}"
+            status_code=500, detail=f"Error processing message: {str(e)}"
         )
 
 
-async def generate_stream(agent: UnifiedAgent, message: str, session_id: str, db: Session = None):
+async def generate_stream(
+    agent: UnifiedAgent, message: str, session_id: str, db: Session = None
+):
     """
     Generator function for SSE streaming.
 
@@ -245,7 +263,7 @@ async def generate_stream(agent: UnifiedAgent, message: str, session_id: str, db
                     event_data = {
                         "status": item.get("message", ""),
                         "session_id": session_id,
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now().isoformat(),
                     }
                 elif item.get("type") == "chunk":
                     # Accumulate full response for logging
@@ -256,7 +274,7 @@ async def generate_stream(agent: UnifiedAgent, message: str, session_id: str, db
                     event_data = {
                         "chunk": chunk_data,
                         "session_id": session_id,
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now().isoformat(),
                     }
                 else:
                     continue
@@ -266,7 +284,7 @@ async def generate_stream(agent: UnifiedAgent, message: str, session_id: str, db
                 event_data = {
                     "chunk": item,
                     "session_id": session_id,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now().isoformat(),
                 }
 
             yield f"data: {json.dumps(event_data)}\n\n"
@@ -278,7 +296,9 @@ async def generate_stream(agent: UnifiedAgent, message: str, session_id: str, db
         if db and full_response:
             with ChatLogger(db) as logger:
                 agent_mode = agent.state.get("agent_mode") if agent.state else None
-                intent_classification = agent.state.get("intent_classification") if agent.state else None
+                intent_classification = (
+                    agent.state.get("intent_classification") if agent.state else None
+                )
                 rag_sources = agent.state.get("rag_sources") if agent.state else None
 
                 logger.log_message(
@@ -287,7 +307,7 @@ async def generate_stream(agent: UnifiedAgent, message: str, session_id: str, db
                     content=full_response,
                     agent_mode=agent_mode,
                     intent_classification=intent_classification,
-                    rag_sources=rag_sources
+                    rag_sources=rag_sources,
                 )
 
                 # Update booking info if applicable
@@ -299,7 +319,7 @@ async def generate_stream(agent: UnifiedAgent, message: str, session_id: str, db
                         booking_time=agent.state.get("selected_slot", {}).get("time"),
                         user_name=agent.state.get("user_name"),
                         user_email=agent.state.get("user_email"),
-                        user_phone=agent.state.get("user_phone")
+                        user_phone=agent.state.get("user_phone"),
                     )
 
         # Send completion event
@@ -307,10 +327,7 @@ async def generate_stream(agent: UnifiedAgent, message: str, session_id: str, db
 
     except Exception as e:
         # Send error event
-        error_data = {
-            "error": str(e),
-            "session_id": session_id
-        }
+        error_data = {"error": str(e), "session_id": session_id}
         yield f"data: {json.dumps(error_data)}\n\n"
 
 
@@ -334,9 +351,7 @@ async def chat_stream(request: ChatRequest = Body(...), db: Session = Depends(ge
         with ChatLogger(db) as logger:
             logger.create_session(session_id)
             logger.log_message(
-                session_id=session_id,
-                role="user",
-                content=request.message
+                session_id=session_id, role="user", content=request.message
             )
 
         # Get or create agent for this session
@@ -349,14 +364,18 @@ async def chat_stream(request: ChatRequest = Body(...), db: Session = Depends(ge
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"  # Disable nginx buffering
-            }
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "*",
+                "X-Frame-Options": "ALLOWALL",
+                "Content-Security-Policy": "frame-ancestors *",
+            },
         )
 
     except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Error processing message: {str(e)}"
+            status_code=500, detail=f"Error processing message: {str(e)}"
         )
 
 
@@ -379,15 +398,9 @@ async def reset_session(session_id: str = Body(..., embed=True)):
 
         sessions[session_id]["last_activity"] = datetime.now()
 
-        return {
-            "message": "Session reset successfully",
-            "session_id": session_id
-        }
+        return {"message": "Session reset successfully", "session_id": session_id}
     else:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Session {session_id} not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
 
 @app.delete("/api/session/{session_id}")
@@ -403,15 +416,9 @@ async def delete_session(session_id: str):
     """
     if session_id in sessions:
         del sessions[session_id]
-        return {
-            "message": "Session deleted successfully",
-            "session_id": session_id
-        }
+        return {"message": "Session deleted successfully", "session_id": session_id}
     else:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Session {session_id} not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
 
 @app.get("/api/stats")
@@ -423,10 +430,10 @@ async def get_stats():
             {
                 "session_id": sid,
                 "created_at": data["created_at"].isoformat(),
-                "last_activity": data["last_activity"].isoformat()
+                "last_activity": data["last_activity"].isoformat(),
             }
             for sid, data in sessions.items()
-        ]
+        ],
     }
 
 
@@ -444,10 +451,4 @@ if __name__ == "__main__":
     print(f"📖 Docs: http://localhost:8000/docs")
     print(f"🔍 Health: http://localhost:8000/api/health\n")
 
-    uvicorn.run(
-        "api:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")

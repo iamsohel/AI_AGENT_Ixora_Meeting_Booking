@@ -37,7 +37,6 @@ class UnifiedAgent:
             "agent_mode": "rag",  # Default to RAG mode
             "previous_agent_mode": "",
             "intent_classification": {},
-
             # Booking-specific fields
             "user_intent": "",
             "date_preference": "not_specified",
@@ -50,7 +49,6 @@ class UnifiedAgent:
             "selected_slot": {},
             "booking_confirmed": False,
             "next_action": "",
-
             # RAG-specific fields
             "rag_sources": [],
         }
@@ -67,6 +65,7 @@ class UnifiedAgent:
         """
         # Reset LLM call tracker for this request
         from utils.llm_tracker import get_llm_call_summary, reset_llm_tracker
+
         reset_llm_tracker()
         logger.info(f"📨 NEW REQUEST: '{user_message[:50]}...'")
 
@@ -82,9 +81,13 @@ class UnifiedAgent:
         # Classify user intent (RAG or Booking)
         # LLM will naturally handle greetings and route to appropriate response
         self.state = classify_intent_node(self.state, self.llm)
-        agent_mode = route_to_agent(self.state)
+        # agent_mode = route_to_agent(self.state)
+        agent_mode = self.state["agent_mode"]
 
         logger.info(f"Routed to agent: {agent_mode} (current_action: {current_action})")
+        logger.info(
+            f"Routed to agent2: {self.state['agent_mode']} (current_action: {current_action})"
+        )
 
         # Define booking-specific actions (don't route to booking for RAG actions)
         booking_actions = [
@@ -94,7 +97,7 @@ class UnifiedAgent:
             "wait_for_user_info",
             "wait_for_confirmation",
             "wait_for_new_booking",
-            "booking_complete"
+            "booking_complete",
         ]
 
         # Route to appropriate agent
@@ -113,13 +116,17 @@ class UnifiedAgent:
 
             # Clear next_action for RAG queries (don't interfere with routing)
             # RAG sets next_action to "rag_complete", but we want to allow fresh routing next time
+            print("state3 ", self.state)
             if self.state.get("next_action") in ["rag_complete", "suggest_booking"]:
                 self.state["next_action"] = ""
 
             # Log LLM call summary
             from utils.llm_tracker import get_llm_call_summary
+
             summary = get_llm_call_summary()
-            logger.info(f"✅ REQUEST COMPLETE: {summary['total_calls']} LLM calls in {summary.get('elapsed_seconds', 0):.2f}s")
+            logger.info(
+                f"✅ REQUEST COMPLETE: {summary['total_calls']} LLM calls in {summary.get('elapsed_seconds', 0):.2f}s"
+            )
 
             # Return the last AI message
             for msg in reversed(self.state["messages"]):
@@ -133,21 +140,25 @@ class UnifiedAgent:
             # Log rate limit info if it's a 429 error
             if "429" in str(e) or "quota" in str(e).lower():
                 from utils.llm_tracker import log_rate_limit_info
+
                 log_rate_limit_info()
 
             # Log summary even on error
             from utils.llm_tracker import get_llm_call_summary
+
             summary = get_llm_call_summary()
-            logger.info(f"✅ REQUEST COMPLETE (with error): {summary['total_calls']} LLM calls in {summary.get('elapsed_seconds', 0):.2f}s")
+            logger.info(
+                f"✅ REQUEST COMPLETE (with error): {summary['total_calls']} LLM calls in {summary.get('elapsed_seconds', 0):.2f}s"
+            )
 
             # Provide a fallback response
             self.state["messages"].append(
                 AIMessage(
                     content="I apologize for the inconvenience. Our knowledge base is temporarily unavailable. "
-                            "However, I can still help you book a meeting with our team.\n\n"
-                            "Ixora Solution is a full-cycle offshore software development company based in Bangladesh, "
-                            "specializing in custom software solutions, web and mobile development, and IT consulting services.\n\n"
-                            "Would you like to schedule a meeting to learn more?"
+                    "However, I can still help you book a meeting with our team.\n\n"
+                    "Ixora Solution is a full-cycle offshore software development company based in Bangladesh, "
+                    "specializing in custom software solutions, web and mobile development, and IT consulting services.\n\n"
+                    "Would you like to schedule a meeting to learn more?"
                 )
             )
             return self.state["messages"][-1].content
@@ -170,6 +181,40 @@ class UnifiedAgent:
             process_slot_selection_node,
             select_slot_node,
         )
+
+        # Use LLM to detect cancellation intent (except during confirmation)
+        # We exclude confirmation because we have specific confirmation handling
+        if current_action != "wait_for_confirmation" and current_action != "booking_complete":
+            from agent.llm_helpers import check_cancellation_intent
+
+            wants_to_cancel = check_cancellation_intent(user_message, current_action, self.llm)
+
+            if wants_to_cancel:
+                # User wants to exit booking and talk about company/services
+                logger.info(f"🚫 BOOKING CANCELLED: User said '{user_message}'")
+
+                # Reset booking state but keep message history
+                old_messages = self.state["messages"].copy()
+                self.initialize_state()
+                self.state["messages"] = old_messages
+
+                # Add natural transition message
+                self.state["messages"].append(
+                    AIMessage(
+                        content="No problem! I'd be happy to tell you more about Ixora Solution. What would you like to know?"
+                    )
+                )
+                self.state["next_action"] = ""
+                self.state["agent_mode"] = "rag"
+
+                # Log LLM call summary
+                from utils.llm_tracker import get_llm_call_summary
+                summary = get_llm_call_summary()
+                logger.info(
+                    f"✅ REQUEST COMPLETE (booking cancelled): {summary['total_calls']} LLM calls in {summary.get('elapsed_seconds', 0):.2f}s"
+                )
+
+                return self.state["messages"][-1].content
 
         # Existing booking logic from BookingAgent.process_message
         if current_action == "wait_for_user_input":
@@ -194,7 +239,9 @@ class UnifiedAgent:
             elif intent == "no":
                 # User doesn't want to book
                 self.state["messages"].append(
-                    AIMessage(content="No problem! Feel free to reach out when you'd like to book a meeting. Have a great day!")
+                    AIMessage(
+                        content="No problem! Feel free to reach out when you'd like to book a meeting. Have a great day!"
+                    )
                 )
                 self.state["next_action"] = ""
             else:  # new_request
@@ -218,7 +265,7 @@ class UnifiedAgent:
             intent = check_user_intent_in_context(
                 user_message,
                 "We asked for your contact information (name, email, phone). Did the user provide this information or are they trying to start a new booking?",
-                self.llm
+                self.llm,
             )
 
             if intent == "new_booking":
@@ -239,9 +286,7 @@ class UnifiedAgent:
         elif current_action == "wait_for_confirmation":
             # Use LLM to check confirmation (flexible understanding)
             confirmation_result = check_user_confirmation(
-                user_message,
-                "We asked: Is this booking information correct?",
-                self.llm
+                user_message, "We asked: Is this booking information correct?", self.llm
             )
 
             if confirmation_result == "confirmed":
@@ -253,13 +298,17 @@ class UnifiedAgent:
                 self.initialize_state()
                 self.state["messages"] = old_messages
                 self.state["messages"].append(
-                    AIMessage(content="Booking cancelled. No problem!\n\nWould you like to book a meeting for a different date?")
+                    AIMessage(
+                        content="Booking cancelled. No problem!\n\nWould you like to book a meeting for a different date?"
+                    )
                 )
                 self.state["next_action"] = "wait_for_new_booking"
             else:  # unclear
                 # Ask for clarification
                 self.state["messages"].append(
-                    AIMessage(content="I didn't quite catch that. Please confirm if the booking details are correct by saying 'yes' to proceed or 'no' to cancel.")
+                    AIMessage(
+                        content="I didn't quite catch that. Please confirm if the booking details are correct by saying 'yes' to proceed or 'no' to cancel."
+                    )
                 )
                 self.state["next_action"] = "wait_for_confirmation"
 
@@ -295,7 +344,9 @@ class UnifiedAgent:
             elif intent == "no":
                 # User doesn't want to book
                 self.state["messages"].append(
-                    AIMessage(content="No problem! Feel free to reach out when you'd like to book a meeting. Have a great day!")
+                    AIMessage(
+                        content="No problem! Feel free to reach out when you'd like to book a meeting. Have a great day!"
+                    )
                 )
                 self.state["next_action"] = ""
             else:  # new_request
@@ -306,7 +357,9 @@ class UnifiedAgent:
                     self.state = select_slot_node(self.state, self.llm)
                 else:
                     self.state["messages"].append(
-                        AIMessage(content="I didn't catch that. What date would you like to schedule the meeting?")
+                        AIMessage(
+                            content="I didn't catch that. What date would you like to schedule the meeting?"
+                        )
                     )
                     self.state["next_action"] = "wait_for_user_input"
 
@@ -321,8 +374,11 @@ class UnifiedAgent:
 
         # Log LLM call summary before returning
         from utils.llm_tracker import get_llm_call_summary
+
         summary = get_llm_call_summary()
-        logger.info(f"✅ REQUEST COMPLETE: {summary['total_calls']} LLM calls in {summary.get('elapsed_seconds', 0):.2f}s")
+        logger.info(
+            f"✅ REQUEST COMPLETE: {summary['total_calls']} LLM calls in {summary.get('elapsed_seconds', 0):.2f}s"
+        )
 
         # Return the last AI message
         for msg in reversed(self.state["messages"]):
@@ -381,14 +437,17 @@ class UnifiedAgent:
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             yield {"type": "status", "message": ""}
-            yield {"type": "chunk", "data": "I apologize, but I encountered an error. Please try again or rephrase your question."}
+            yield {
+                "type": "chunk",
+                "data": "I apologize, but I encountered an error. Please try again or rephrase your question.",
+            }
             return
 
         # Clear status and start streaming response
         yield {"type": "status", "message": ""}
 
         # Stream the response word by word while preserving newlines
-        parts = re.split(r'(\s+)', response)
+        parts = re.split(r"(\s+)", response)
 
         for part in parts:
             if part:

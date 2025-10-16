@@ -276,3 +276,135 @@ Return ONLY JSON:
     except Exception as e:
         logger.error(f"Error in intent context check: {e}")
         return "providing_info"  # Default to assuming they're providing info
+
+
+def check_cancellation_intent(
+    user_message: str,
+    current_action: str,
+    llm
+) -> bool:
+    """
+    Use LLM to detect if user wants to cancel the booking process.
+
+    This replaces hardcoded keyword matching with intelligent understanding.
+
+    Args:
+        user_message: What the user said
+        current_action: Current booking workflow state
+        llm: Language model instance
+
+    Returns:
+        True if user wants to cancel/exit booking
+        False if user wants to continue with booking
+
+    Examples:
+        >>> check_cancellation_intent("no, let's talk about your services", "wait_for_user_input", llm)
+        True
+        >>> check_cancellation_intent("cancel", "wait_for_slot_selection", llm)
+        True
+        >>> check_cancellation_intent("next Tuesday", "wait_for_user_input", llm)
+        False
+        >>> check_cancellation_intent("tell me about your company", "wait_for_new_date", llm)
+        True
+    """
+    # Check cache first
+    from utils.cache import get_cache
+    cache = get_cache()
+    cache_key = f"cancellation:{user_message.lower().strip()}"
+    cached_result = cache.get(cache_key)
+
+    if cached_result is not None:
+        logger.info(f"✅ Using cached cancellation result for: {user_message[:50]}")
+        return cached_result
+
+    # Map action to context for better LLM understanding
+    action_context = {
+        "wait_for_user_input": "asking for a date/time preference",
+        "wait_for_slot_selection": "asking user to select a time slot",
+        "wait_for_new_date": "asking if user wants to try a different date",
+        "wait_for_user_info": "collecting user's contact information",
+        "wait_for_new_booking": "asking if user wants to book a meeting"
+    }
+
+    context = action_context.get(current_action, "in the booking process")
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are analyzing if a user wants to cancel/exit a booking process.
+
+Context: We are currently {context}
+User responded: "{user_message}"
+
+Determine if the user wants to:
+- **cancel**: Exit the booking process and do something else
+  Examples:
+  - "no, let's talk about your services"
+  - "cancel"
+  - "stop"
+  - "nevermind"
+  - "tell me about your company"
+  - "what do you offer"
+  - "I want to know more about you first"
+  - "not interested"
+  - "let me think about it"
+
+- **continue**: Continue with the booking process
+  Examples:
+  - "next Tuesday"
+  - "tomorrow at 3pm"
+  - "slot 2"
+  - "my email is john@example.com"
+  - "can you show me more times?"
+  - "what about Wednesday?"
+
+Return ONLY JSON:
+{{{{
+  "wants_to_cancel": true or false,
+  "confidence": 0.0 to 1.0,
+  "reason": "brief explanation"
+}}}}"""),
+        ("user", "Context: {context}\nUser said: {user_message}")
+    ])
+
+    try:
+        # Track LLM call
+        from utils.llm_tracker import track_llm_call
+        track_llm_call(
+            call_type="chat",
+            location="llm_helpers.py:check_cancellation_intent",
+            model=getattr(llm, 'model_name', 'unknown'),
+            purpose="Booking cancellation detection"
+        )
+
+        chain = prompt | llm
+        response = chain.invoke({
+            "context": context,
+            "user_message": user_message
+        })
+
+        # Parse JSON response
+        content = response.content
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+
+        result = json.loads(content)
+        wants_to_cancel = result.get("wants_to_cancel", False)
+        confidence = result.get("confidence", 0.0)
+        reason = result.get("reason", "")
+
+        logger.info(
+            f"Cancellation check: '{user_message}' → {wants_to_cancel} "
+            f"(confidence: {confidence}, reason: {reason})"
+        )
+
+        # Cache the result for 10 minutes
+        cache.set(cache_key, wants_to_cancel, ttl=600)
+
+        return wants_to_cancel
+
+    except Exception as e:
+        logger.error(f"Error in cancellation check: {e}")
+        logger.error(f"Response content: {response.content if 'response' in locals() else 'N/A'}")
+        # Default to not canceling if there's an error (safer to continue)
+        return False

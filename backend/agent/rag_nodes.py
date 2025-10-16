@@ -41,66 +41,6 @@ def rag_query_node(state: dict, llm) -> dict:
         state["next_action"] = ""
         return state
 
-    # Check if RAG is disabled
-    disable_rag = os.getenv("DISABLE_RAG", "false").lower() == "true"
-
-    if disable_rag:
-        # Use LLM to generate a contextual response without RAG
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning("⚠️ RAG is disabled - using LLM to generate response without vector search")
-
-        # Track LLM call
-        from utils.llm_tracker import track_llm_call
-        track_llm_call(
-            call_type="chat",
-            location="rag_nodes.py:rag_query_node",
-            model=getattr(llm, 'model_name', 'unknown'),
-            purpose="Generate response without RAG (quota exhausted)"
-        )
-
-        # Use LLM to generate contextual response based on the question
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a helpful AI assistant for Ixora Solution.
-
-RAG (vector search) is currently unavailable, but you can still help with general information about the company.
-
-**What you know about Ixora Solution:**
-- Full-cycle offshore software development company based in Bangladesh
-- Specializes in: custom software solutions, web and mobile development, and IT consulting services
-- Provides services like: software development, mobile apps, web applications, IT consulting, cloud solutions
-- Works with various technologies and frameworks
-- Has experienced development teams
-
-**Important:**
-- Be helpful and answer based on the general information above
-- If you need more specific details, suggest booking a meeting with the team
-- Don't make up specific details you don't know
-- Be conversational and natural
-
-Answer the user's question based on this general knowledge."""),
-            MessagesPlaceholder(variable_name="chat_history", optional=True),
-            ("user", "{question}")
-        ])
-
-        # Prepare chat history
-        chat_history = []
-        for msg in messages[:-1]:
-            if isinstance(msg, HumanMessage):
-                chat_history.append(("user", msg.content))
-            elif isinstance(msg, AIMessage):
-                chat_history.append(("assistant", msg.content))
-
-        chain = prompt | llm
-        response = chain.invoke({
-            "chat_history": chat_history,
-            "question": last_user_message
-        })
-
-        state["messages"].append(AIMessage(content=response.content))
-        state["next_action"] = "rag_complete"
-        return state
-
     # Convert chat history to format expected by RAG
     chat_history = []
     for msg in messages[:-1]:  # Exclude the current message
@@ -112,34 +52,36 @@ Answer the user's question based on this general knowledge."""),
     try:
         # Track RAG query (involves embedding + generation)
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("🤖 RAG QUERY: Embedding + Generation (2 API calls)")
 
         from utils.llm_tracker import track_llm_call
+
         track_llm_call(
             call_type="embedding",
             location="rag_nodes.py:rag_query_node",
             model="embedding-001",
-            purpose="RAG: Embed user query for vector search"
+            purpose="RAG: Embed user query for vector search",
         )
         track_llm_call(
             call_type="chat",
             location="rag_nodes.py:rag_query_node",
             model="gemini-flash",
-            purpose="RAG: Generate answer from retrieved docs"
+            purpose="RAG: Generate answer from retrieved docs",
         )
 
         # Query the RAG system
-        result = query_rag(
-            question=last_user_message,
-            chat_history=chat_history
-        )
+        result = query_rag(question=last_user_message, chat_history=chat_history)
 
         answer = result["answer"]
 
         # Check if the answer mentions booking
         answer_lower = answer.lower()
-        if any(keyword in answer_lower for keyword in ["book", "schedule", "meeting", "appointment"]):
+        if any(
+            keyword in answer_lower
+            for keyword in ["book", "schedule", "meeting", "appointment"]
+        ):
             # Add a helpful prompt about booking
             answer += "\n\nWould you like me to help you book a meeting with our team?"
 
@@ -152,8 +94,14 @@ Answer the user's question based on this general knowledge."""),
         # Check if user might want to book a meeting based on the question
         question_lower = last_user_message.lower()
         booking_intent_keywords = [
-            "book", "schedule", "meeting", "appointment",
-            "talk", "discuss", "consultation", "demo"
+            "book",
+            "schedule",
+            "meeting",
+            "appointment",
+            "talk",
+            "discuss",
+            "consultation",
+            "demo",
         ]
 
         if any(keyword in question_lower for keyword in booking_intent_keywords):
@@ -164,12 +112,15 @@ Answer the user's question based on this general knowledge."""),
     except Exception as e:
         # Handle errors gracefully - use LLM fallback
         import logging
+
         logger = logging.getLogger(__name__)
         logger.error(f"RAG query error: {e}")
 
         # Check if it's a quota/rate limit error
         error_str = str(e).lower()
-        is_quota_error = "quota" in error_str or "429" in error_str or "rate limit" in error_str
+        is_quota_error = (
+            "quota" in error_str or "429" in error_str or "rate limit" in error_str
+        )
 
         if is_quota_error:
             logger.warning("⚠️ Quota error detected - using LLM fallback")
@@ -178,26 +129,32 @@ Answer the user's question based on this general knowledge."""),
         try:
             # Track LLM call
             from utils.llm_tracker import track_llm_call
+
             track_llm_call(
                 call_type="chat",
                 location="rag_nodes.py:rag_query_node (error handler)",
-                model=getattr(llm, 'model_name', 'unknown'),
-                purpose="Generate response after RAG error"
+                model=getattr(llm, "model_name", "unknown"),
+                purpose="Generate response after RAG error",
             )
 
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", """You are a helpful AI assistant for Ixora Solution.
+            prompt = ChatPromptTemplate.from_messages(
+                [
+                    (
+                        "system",
+                        """You are a helpful AI assistant for Ixora Solution.
 
-The vector search system encountered an error, but you can still help with general information.
+            The vector search system encountered an error, but you can still help with general information.
 
-**What you know about Ixora Solution:**
-- Full-cycle offshore software development company based in Bangladesh
-- Specializes in: custom software solutions, web and mobile development, and IT consulting services
-- Provides services like: software development, mobile apps, web applications, IT consulting, cloud solutions
+            **What you know about Ixora Solution:**
+            - Full-cycle offshore software development company based in Bangladesh
+            - Specializes in: custom software solutions, web and mobile development, and IT consulting services
+            - Provides services like: software development, mobile apps, web applications, IT consulting, cloud solutions
 
-Answer the user's question based on this general knowledge. If you need more details, suggest booking a meeting."""),
-                ("user", "{question}")
-            ])
+            Answer the user's question based on this general knowledge. If you need more details, suggest booking a meeting.""",
+                    ),
+                    ("user", "{question}"),
+                ]
+            )
 
             chain = prompt | llm
             response = chain.invoke({"question": last_user_message})
@@ -208,7 +165,7 @@ Answer the user's question based on this general knowledge. If you need more det
             state["messages"].append(
                 AIMessage(
                     content="I apologize, but I'm having trouble accessing information right now. "
-                            "However, I can help you book a meeting with our team. Would you like to schedule a meeting?"
+                    "However, I can help you book a meeting with our team. Would you like to schedule a meeting?"
                 )
             )
 
